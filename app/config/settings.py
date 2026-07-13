@@ -67,5 +67,12 @@ class Settings(BaseSettings):
     def tz(self) -> ZoneInfo:
         return ZoneInfo(self.timezone)
 
+    @cached_property
+    def alembic_database_url(self) -> str:
+        return self.database_url.replace(
+            "postgresql+asyncpg",
+            "postgresql+psycopg",
+        )
+
 
 settings = Settings()

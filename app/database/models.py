@@ -14,6 +14,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import Enum
 
 from app.database.base import (
     Base, IDMixin, TimestampMixin, CreatedAtMixin, UUIDMixin
@@ -21,6 +22,14 @@ from app.database.base import (
 from app.database.enums import (
     Direction, SignalStatus, CloseReason, Provider, TrackingStatus, MessageType, AuditEventType
 )
+
+DIRECTION_ENUM = Enum(Direction, name="direction_enum")
+SIGNAL_STATUS_ENUM = Enum(SignalStatus, name="signal_status_enum")
+CLOSE_REASON_ENUM = Enum(CloseReason, name="close_reason_enum")
+PROVIDER_ENUM = Enum(Provider, name="provider_enum")
+TRACKING_STATUS_ENUM = Enum(TrackingStatus, name="tracking_status_enum")
+MESSAGE_TYPE_ENUM = Enum(MessageType, name="message_type_enum")
+AUDIT_EVENT_TYPE_ENUM = Enum(AuditEventType, name="audit_event_type_enum")
 
 
 # ==============================================================================
@@ -132,21 +141,13 @@ class Signal(IDMixin, TimestampMixin, Base):
         index=True,
     )
 
-    # telegram_channel_id: Mapped[int] = mapped_column(
-    #     BigInteger,
-    # )
-
-    # telegram_message_id: Mapped[int] = mapped_column(
-    #     BigInteger,
-    #     unique=True,
-    # )
-
-    published_channel_id: Mapped[int | None] = mapped_column(
+    telegram_channel_id: Mapped[int] = mapped_column(
         BigInteger,
     )
 
-    published_message_id: Mapped[int | None] = mapped_column(
+    telegram_message_id: Mapped[int] = mapped_column(
         BigInteger,
+        unique=True,
     )
 
     symbol: Mapped[str] = mapped_column(
@@ -154,7 +155,7 @@ class Signal(IDMixin, TimestampMixin, Base):
         index=True,
     )
 
-    direction: Mapped[Direction]
+    direction: Mapped[Direction] = mapped_column(DIRECTION_ENUM)
 
     leverage: Mapped[int] = mapped_column(
         SmallInteger,
@@ -170,6 +171,7 @@ class Signal(IDMixin, TimestampMixin, Base):
     )
 
     status: Mapped[SignalStatus] = mapped_column(
+        SIGNAL_STATUS_ENUM,
         index=True,
     )
 
@@ -267,18 +269,23 @@ class Tracking(IDMixin, TimestampMixin, Base):
         index=True,
     )
 
-    status: Mapped[TrackingStatus]
+    status: Mapped[TrackingStatus] = mapped_column(TRACKING_STATUS_ENUM)
 
-    provider: Mapped[Provider]
+    provider: Mapped[Provider] = mapped_column(PROVIDER_ENUM)
 
     is_active: Mapped[bool] = mapped_column(
+        Boolean,
         default=True,
         index=True,
     )
 
-    started_at: Mapped[datetime | None]
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
 
-    closed_at: Mapped[datetime | None]
+    closed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
 
     last_processed_price: Mapped[Decimal | None] = mapped_column(
         Numeric(20, 8),
@@ -301,7 +308,7 @@ class Tracking(IDMixin, TimestampMixin, Base):
         default=0,
     )
 
-    close_reason: Mapped[CloseReason | None]
+    close_reason: Mapped[CloseReason | None] = mapped_column(CLOSE_REASON_ENUM)
 
     final_price: Mapped[Decimal | None] = mapped_column(
         Numeric(20, 8),
@@ -347,7 +354,9 @@ class TpHit(IDMixin, CreatedAtMixin, Base):
         Numeric(12, 4),
     )
 
-    hit_at: Mapped[datetime]
+    hit_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+    )
 
     tracking: Mapped["Tracking"] = relationship(
         back_populates="tp_hits",
@@ -376,7 +385,7 @@ class TelegramMessage(UUIDMixin, TimestampMixin, Base):
         index=True,
     )
 
-    type: Mapped[MessageType]
+    type: Mapped[MessageType] = mapped_column(MESSAGE_TYPE_ENUM)
 
     channel_id: Mapped[int] = mapped_column(
         BigInteger,
@@ -394,6 +403,13 @@ class TelegramMessage(UUIDMixin, TimestampMixin, Base):
 
     tracking: Mapped["Tracking"] = relationship()
 
+    __table_args__ = (
+        UniqueConstraint(
+            "channel_id",
+            "message_id",
+        ),
+    )
+
 
 # ======================================================================
 
@@ -410,7 +426,7 @@ class AuditLog(UUIDMixin, CreatedAtMixin, Base):
         index=True,
     )
 
-    event: Mapped[AuditEventType]
+    event: Mapped[AuditEventType] = mapped_column(AUDIT_EVENT_TYPE_ENUM)
 
     payload: Mapped[dict] = mapped_column(
         JSONB,
