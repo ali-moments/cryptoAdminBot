@@ -18,6 +18,7 @@ class TrackingStatus(str, Enum):
     WAITING_ENTRY = "WAITING_ENTRY"
     TRACKING = "TRACKING"
     CLOSED = "CLOSED"
+    CANCELLED = "CANCELLED"
 
 
 class CloseReason(str, Enum):
