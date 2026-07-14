@@ -17,3 +17,7 @@ wheels/
 
 # ide settings
 pyrightconfig.json
+
+# docs (because they are not completed yet)
+docs/*
+todo.txt
