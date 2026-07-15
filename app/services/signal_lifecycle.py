@@ -1,67 +1,74 @@
-from app.core.dto import ParsedSignal
+from datetime import datetime, timedelta, UTC
+from loguru import logger
+from app.core.dto import ValidatedSignal
 from app.database.enums import AuditEventType, SignalStatus
-from app.database.models import Signal
+from app.database.models import (
+    AuditLog,
+    Signal,
+    SignalEntry,
+    SignalSource,
+    SignalTarget,
+)
 from app.database.uow import UnitOfWork
 
 
 class SignalLifecycleService:
     async def create_signal(
         self,
-        parsed: ParsedSignal,
+        signal: ValidatedSignal,
+        source: SignalSource,
+        uow: UnitOfWork,
     ) -> Signal:
-        async with UnitOfWork() as uow:
-            signal = await uow.signals.create(
-                source_id=parsed.source_id,
-                symbol=parsed.symbol,
-                direction=parsed.direction,
-                leverage=parsed.leverage,
-                stop_loss=parsed.stop_loss,
-                expires_at=parsed.expires_at,
-                status=SignalStatus.WAITING_ENTRY,
+        db_signal = Signal(
+            source_id=source.id,
+            symbol=signal.symbol,
+            direction=signal.direction,
+            leverage=signal.leverage,
+            stop_loss=signal.stop_loss,
+            expires_at=datetime.now(UTC) + timedelta(hours=72),
+            status=SignalStatus.WAITING_ENTRY,
+        )
+
+        await uow.signals.add(db_signal)
+        await uow.flush()
+
+        logger.trace("Signal added to db.")
+
+        for entry in signal.entries:
+            await uow.signal_entries.add(
+                SignalEntry(
+                    signal_id = db_signal.id,
+                    position = entry.position,
+                    price = entry.price,
+                )
             )
+        logger.trace("Entries added to db.")
 
-            await uow.flush()
-
-            for entry in parsed.entries:
-                await uow.entries.create(
-                    signal_id=signal.id,
-                    entry_number=entry.number,
-                    price=entry.price,
+        for target in signal.targets:
+            await uow.signal_targets.add(
+                SignalTarget(
+                    signal_id = db_signal.id,
+                    position = target.position,
+                    price = target.price,
                 )
+            )
+        logger.trace("Targets added to db.")
 
-            for target in parsed.targets:
-                await uow.targets.create(
-                    signal_id=signal.id,
-                    target_number=target.number,
-                    price=target.price,
-                )
-
-            await uow.audit.create(
-                signal_id=signal.id,
+        await uow.audit_logs.add(
+            AuditLog(
+                signal_id=db_signal.id,
                 event=AuditEventType.SIGNAL_RECEIVED,
                 payload={
-                    "symbol": parsed.symbol,
-                    "direction": parsed.direction.value,
-                    "source_id": parsed.source_id,
-                    "leverage": parsed.leverage,
-                    "stop_loss": str(parsed.stop_loss),
-                    "entries": [
-                        {
-                            "number": e.number,
-                            "price": str(e.price),
-                        }
-                        for e in parsed.entries
-                    ],
-                    "targets": [
-                        {
-                            "number": t.number,
-                            "price": str(t.price),
-                        }
-                        for t in parsed.targets
-                    ],
-                },
+                    "symbol": db_signal.symbol,
+                    "direction": db_signal.direction,
+                    "source_id": db_signal.source_id,
+                    "leverage": db_signal.leverage,
+                    "stop_loss": str(db_signal.stop_loss),
+                    "entries": str(signal.entries),
+                    "targets": str(signal.targets),
+                }
             )
+        )
+        logger.trace("Audit_log for the Signal saved to db.")
 
-            await uow.commit()
-
-            return signal
+        return db_signal
