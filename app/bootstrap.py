@@ -1,7 +1,17 @@
 from dataclasses import dataclass
 
 from app.database.uow import UnitOfWork
-from app.telegram.parsers.bulls import BullsSignalParser
+from app.telegram.parsers.bulls_signal import BullsSignalParser
+from app.telegram.parsers.bulls_signal2 import BullsSignal2Parser
+from app.telegram.parsers.bitcoin_bulls_vip import BitcoinBullsVIPParser
+from app.telegram.parsers.gcr_vvip import GCRParser
+from app.telegram.parsers.crypto_mermaids import CryptoMermaidsParser
+from app.telegram.parsers.crypto_monk import CryptoMonkParser
+from app.telegram.parsers.crypto_safe_calls import SafeCallParser
+from app.telegram.parsers.sparta_crypto import SpartaCryptoParser
+from app.telegram.parsers.crypto_aman import CryptoAmanParser
+from app.telegram.parsers.mahee_vip import MaheeVIPParser
+from app.telegram.parsers.crypto_traders_vip import CryptoTradersVIPParser
 from app.services.ourbit_registry import OurbitRegistry
 from app.services.validation import ValidationService
 from app.services.signal_lifecycle import SignalLifecycleService
@@ -35,10 +45,18 @@ def build_application() -> Application:
 
     parser_manager = ParserManager()
 
-    parser_manager.register(
-        "bulls",
-        BullsSignalParser(),
-    )
+    parser_manager.register("bulls_signal", BullsSignalParser())
+    parser_manager.register("bulls_signal2", BullsSignal2Parser())
+    parser_manager.register("bitcoin_bulls_vip", BitcoinBullsVIPParser())
+    parser_manager.register("gcr_vvip", GCRParser())
+    parser_manager.register("crypto_mermaids", CryptoMermaidsParser())
+    parser_manager.register("crypto_monk", CryptoMonkParser())
+    parser_manager.register("crypto_safe_calls", SafeCallParser())
+    parser_manager.register("sparta_crypto", SpartaCryptoParser())
+    parser_manager.register("crypto_aman", CryptoAmanParser())
+    parser_manager.register("mahee_vip", MaheeVIPParser())
+    parser_manager.register("crypto_traders_vip", CryptoTradersVIPParser())
+
 
     validation = ValidationService(
         registry,
