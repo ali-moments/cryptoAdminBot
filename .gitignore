@@ -12,7 +12,12 @@ wheels/
 # .env
 .env
 
+# logs
+logs/
+*.log
+
 # telegram sessions
+sessions/
 *.session*
 
 # ide settings
