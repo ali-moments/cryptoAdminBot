@@ -14,7 +14,7 @@ class SignalTargetRepository(BaseRepository[SignalTarget]):
         stmt = (
             select(SignalTarget)
             .where(SignalTarget.signal_id == signal_id)
-            .order_by(SignalTarget.target_number)
+            .order_by(SignalTarget.position)
         )
 
         result = await self.session.scalars(stmt)

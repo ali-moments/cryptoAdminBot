@@ -20,6 +20,11 @@ class BaseRepository(Generic[ModelType]):
         await self.session.flush()
         return obj
 
+    async def add(self, obj: ModelType) -> ModelType:
+        self.session.add(obj)
+        await self.session.flush()
+        return obj
+
     async def get(self, id: int) -> ModelType | None:
         return await self.session.get(self.model, id)
 
