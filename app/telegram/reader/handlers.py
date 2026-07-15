@@ -25,6 +25,7 @@ def register_handlers(reader) -> None:
                 if message.forward
                 else None
             ),
+            sender_id=event.sender_id,
         )
 
         if message.forward:

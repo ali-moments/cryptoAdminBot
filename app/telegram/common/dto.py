@@ -17,3 +17,5 @@ class RawTelegramMessage:
     forwarded_chat_id: int | None
 
     forwarded_message_id: int |None
+
+    sender_id: int

@@ -5,6 +5,7 @@ from app.services.signal_lifecycle import SignalLifecycleService
 from app.services.validation import ValidationService
 from app.telegram.parsers.manager import ParserManager
 from app.telegram.reader.events import TelegramMessageReceived
+from app.config.settings import settings
 
 
 class MessageProcessor:
@@ -20,13 +21,10 @@ class MessageProcessor:
         self._validation_service = validation_service
         self._signal_lifecycle = signal_lifecycle
 
-    async def handle(
-        self,
-        event: TelegramMessageReceived,
-    ) -> None:
+    async def handle(self, event: TelegramMessageReceived) -> None:
         try:
             channel_id = event.message.channel_id
-            if event.message.is_forwarded:
+            if event.message.is_forwarded and event.message.sender_id in settings.admins:
                 channel_id = event.message.forwarded_chat_id
             async with self._uow_factory() as uow:
                 source = await uow.signal_sources.get_by_channel_id(channel_id)
@@ -75,7 +73,4 @@ class MessageProcessor:
                 await uow.commit()
 
         except Exception as e:
-            # TODO:
             logger.exception("{}", e)
-            # create AuditLog(ERROR)
-            raise

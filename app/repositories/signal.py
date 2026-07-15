@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
-from app.database.enums import SignalStatus
+from app.database.enums import SignalStatus, Direction
 from app.database.models import Signal
 from app.repositories.base import BaseRepository
 
@@ -94,3 +94,29 @@ class SignalRepository(BaseRepository[Signal]):
         )
 
         return (await self.session.scalar(stmt)) or 0
+
+    async def find_active_candidates(
+        self,
+        symbol: str,
+        direction: Direction,
+    ) -> list[Signal]:
+        stmt = (
+            select(Signal)
+            .where(
+                Signal.symbol == symbol,
+                Signal.direction == direction,
+                Signal.status.in_(
+                    (
+                        SignalStatus.WAITING_ENTRY,
+                        SignalStatus.TRACKING,
+                    )
+                ),
+            )
+            .options(
+                selectinload(Signal.entries),
+                selectinload(Signal.targets),
+            )
+        )
+
+        result = await self.session.scalars(stmt)
+        return list(result)

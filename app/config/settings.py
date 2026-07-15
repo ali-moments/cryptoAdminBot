@@ -35,10 +35,9 @@ class Settings(BaseSettings):
     reader_session: str = Field(alias="READER_SESSION")
 
     admin_bot_token: str = Field(alias="ADMIN_BOT_TOKEN")
-
+    raw_admins: str = Field(alias="ADMINS")
     signals_channel: int = Field(alias="SIGNALS_CHANNEL")
     profit_channel: int = Field(alias="PROFIT_CHANNEL")
-    admin_chat: int = Field(alias="ADMIN_CHAT")
 
     # =========================
     # Engine
@@ -66,6 +65,10 @@ class Settings(BaseSettings):
     @cached_property
     def tz(self) -> ZoneInfo:
         return ZoneInfo(self.timezone)
+
+    @cached_property
+    def admins(self) -> list:
+        return [int(x.strip()) for x in self.raw_admins.split(',') if x.strip()]
 
     @cached_property
     def alembic_database_url(self) -> str:

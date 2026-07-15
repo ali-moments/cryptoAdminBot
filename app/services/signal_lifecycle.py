@@ -13,12 +13,69 @@ from app.database.uow import UnitOfWork
 
 
 class SignalLifecycleService:
+    async def _find_duplicate(
+        self,
+        signal: ValidatedSignal,
+        uow: UnitOfWork,
+    ) -> Signal | None:
+
+        candidates = await uow.signals.find_active_candidates(
+            symbol=signal.symbol,
+            direction=signal.direction,
+        )
+
+        new_entries = {
+            entry.price
+            for entry in signal.entries
+        }
+
+        new_targets = {
+            target.price
+            for target in signal.targets
+        }
+
+        for candidate in candidates:
+            db_entries = {
+                entry.price
+                for entry in candidate.entries
+            }
+
+            db_targets = {
+                target.price
+                for target in candidate.targets
+            }
+
+            entries_match = (
+                new_entries <= db_entries
+                or db_entries <= new_entries
+            )
+
+            targets_match = (
+                new_targets <= db_targets
+                or db_targets <= new_targets
+            )
+
+            if entries_match and targets_match:
+                return candidate
+
+        return None
+
+
     async def create_signal(
         self,
         signal: ValidatedSignal,
         source: SignalSource,
         uow: UnitOfWork,
     ) -> Signal:
+        duplicate = await self._find_duplicate(
+            signal=signal,
+            uow=uow,
+        )
+
+        if duplicate is not None:
+            logger.trace("Duplicate signal ignored.")
+            return duplicate
+
         db_signal = Signal(
             source_id=source.id,
             symbol=signal.symbol,
