@@ -41,6 +41,11 @@ class SignalSource(IDMixin, TimestampMixin, Base):
         String(100),
     )
 
+    parser_name: Mapped[str] = mapped_column(
+        String(100),
+        index=True
+    )
+
     telegram_channel_id: Mapped[int] = mapped_column(
         BigInteger,
         unique=True,
@@ -141,15 +146,6 @@ class Signal(IDMixin, TimestampMixin, Base):
         index=True,
     )
 
-    telegram_channel_id: Mapped[int] = mapped_column(
-        BigInteger,
-    )
-
-    telegram_message_id: Mapped[int] = mapped_column(
-        BigInteger,
-        unique=True,
-    )
-
     symbol: Mapped[str] = mapped_column(
         String(30),
         index=True,
@@ -182,13 +178,13 @@ class Signal(IDMixin, TimestampMixin, Base):
     entries: Mapped[list["SignalEntry"]] = relationship(
         back_populates="signal",
         cascade="all, delete-orphan",
-        order_by="SignalEntry.entry_number",
+        order_by="SignalEntry.position",
     )
 
     targets: Mapped[list["SignalTarget"]] = relationship(
         back_populates="signal",
         cascade="all, delete-orphan",
-        order_by="SignalTarget.target_number",
+        order_by="SignalTarget.position",
     )
 
     tracking: Mapped["Tracking"] = relationship(

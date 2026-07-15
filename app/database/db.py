@@ -18,8 +18,7 @@ engine = create_async_engine(
     max_overflow=20,
 )
 
-
-SessionMaker = async_sessionmaker(
+SessionLocal = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,
     expire_on_commit=False,
@@ -28,7 +27,7 @@ SessionMaker = async_sessionmaker(
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    async with SessionMaker() as session:
+    async with SessionLocal() as session:
         yield session
 
 

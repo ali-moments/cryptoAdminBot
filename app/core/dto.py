@@ -7,20 +7,18 @@ from app.database.enums import Direction
 
 @dataclass(slots=True)
 class ParsedEntry:
-    number: int
+    position: int
     price: Decimal
 
 
 @dataclass(slots=True)
 class ParsedTarget:
-    number: int
+    position: int
     price: Decimal
 
 
 @dataclass(slots=True)
 class ParsedSignal:
-    source_id: int
-
     symbol: str
 
     direction: Direction
@@ -29,8 +27,21 @@ class ParsedSignal:
 
     stop_loss: Decimal
 
-    expires_at: datetime
-
     entries: list[ParsedEntry]
 
     targets: list[ParsedTarget]
+
+
+@dataclass(slots=True)
+class ValidatedSignal:
+    symbol: str
+
+    direction: Direction
+
+    leverage: int
+
+    entries: list[Decimal]
+
+    targets: list[Decimal]
+
+    stop_loss: Decimal

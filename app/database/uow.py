@@ -5,7 +5,7 @@ from app.repositories.audit import AuditRepository
 from app.repositories.signal import SignalRepository
 from app.repositories.signal_entry import SignalEntryRepository
 from app.repositories.signal_target import SignalTargetRepository
-from app.repositories.source import SourceRepository
+from app.repositories.signal_source import SourceRepository
 from app.repositories.telegram import TelegramRepository
 from app.repositories.tp_hit import TpHitRepository
 from app.repositories.tracking import TrackingRepository
@@ -16,25 +16,25 @@ class UnitOfWork:
         self.session: AsyncSession | None = None
 
         self.signals: SignalRepository
-        self.entries: SignalEntryRepository
-        self.targets: SignalTargetRepository
+        self.signal_entries: SignalEntryRepository
+        self.signal_targets: SignalTargetRepository
         self.trackings: TrackingRepository
         self.tp_hits: TpHitRepository
-        self.telegram: TelegramRepository
-        self.audit: AuditRepository
-        self.sources: SourceRepository
+        self.telegram_messages: TelegramRepository
+        self.audit_logs: AuditRepository
+        self.signal_sources: SourceRepository
 
     async def __aenter__(self) -> "UnitOfWork":
         self.session = SessionLocal()
 
         self.signals = SignalRepository(self.session)
-        self.entries = SignalEntryRepository(self.session)
-        self.targets = SignalTargetRepository(self.session)
+        self.signal_entries = SignalEntryRepository(self.session)
+        self.signal_targets = SignalTargetRepository(self.session)
         self.trackings = TrackingRepository(self.session)
         self.tp_hits = TpHitRepository(self.session)
-        self.telegram = TelegramRepository(self.session)
-        self.audit = AuditRepository(self.session)
-        self.sources = SourceRepository(self.session)
+        self.telegram_messages = TelegramRepository(self.session)
+        self.audit_logs = AuditRepository(self.session)
+        self.signal_sources = SourceRepository(self.session)
 
         return self
 
