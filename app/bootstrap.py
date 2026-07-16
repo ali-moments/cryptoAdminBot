@@ -12,7 +12,7 @@ from app.telegram.parsers.sparta_crypto import SpartaCryptoParser
 from app.telegram.parsers.crypto_aman import CryptoAmanParser
 from app.telegram.parsers.mahee_vip import MaheeVIPParser
 from app.telegram.parsers.crypto_traders_vip import CryptoTradersVIPParser
-from app.services.ourbit_registry import OurbitRegistry
+from app.market.symbol_registry import OurbitRegistry
 from app.services.validation import ValidationService
 from app.services.signal_lifecycle import SignalLifecycleService
 from app.services.message_processor import MessageProcessor

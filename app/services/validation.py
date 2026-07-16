@@ -2,7 +2,7 @@ from loguru import logger
 from app.core.dto import ParsedSignal, ValidatedSignal
 from app.database.enums import Direction
 from app.database.uow import UnitOfWork
-from app.services.ourbit_registry import OurbitRegistry
+from app.market.symbol_registry import OurbitRegistry
 
 
 class ValidationService:
