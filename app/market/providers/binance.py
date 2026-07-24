@@ -8,6 +8,7 @@ from loguru import logger
 
 from app.database.enums import Provider
 from app.market.dto import PriceTick
+from app.market.events import PriceUpdatedEvent
 from app.market.providers.base import BaseProvider
 from app.config.settings import settings
 
@@ -45,6 +46,10 @@ class BinanceProvider(BaseProvider):
 
         self._connected = True
 
+        logger.info(
+            "Binance websocket connected"
+        )
+
         self._receive_task = asyncio.create_task(
             self._receive_loop(),
         )
@@ -57,18 +62,33 @@ class BinanceProvider(BaseProvider):
         if self._receive_task:
             self._receive_task.cancel()
 
+            try:
+                await self._receive_task
+            except asyncio.CancelledError:
+                pass
+
+            self._receive_task = None
+
         if self._ws:
             await self._ws.close()
+            self._ws = None
 
         if self._session:
             await self._session.close()
+            self._session = None
 
     async def subscribe(
         self,
         symbol: str,
     ) -> None:
-        if self._ws is None:
+        if self._ws is None or not self._connected:
             raise RuntimeError("Provider is not connected.")
+
+        logger.info(
+            "connected={}, ws={}",
+            self._connected,
+            self._ws,
+        )
 
         symbol = symbol.lower()
 
@@ -77,16 +97,26 @@ class BinanceProvider(BaseProvider):
         if count == 0:
             self._request_id += 1
 
+            payload = {
+                "method": "SUBSCRIBE",
+                "params": [
+                    f"{symbol}@bookTicker",
+                ],
+                "id": self._request_id,
+            }
+
+            logger.trace(
+                "Binance subscribe: {}",
+                payload,
+            )
+
             await self._ws.send(
-                orjson.dumps(
-                    {
-                        "method": "SUBSCRIBE",
-                        "params": [
-                            f"{symbol}@bookTicker",
-                        ],
-                        "id": self._request_id,
-                    }
-                )
+                orjson.dumps(payload).decode(),
+            )
+
+            logger.info(
+                "Subscribe request sent for {}",
+                symbol,
             )
 
         self._subscriptions[symbol] = count + 1
@@ -108,16 +138,21 @@ class BinanceProvider(BaseProvider):
         if count == 1:
             self._request_id += 1
 
+            payload = {
+                "method": "UNSUBSCRIBE",
+                "params": [
+                    f"{symbol}@bookTicker",
+                ],
+                "id": self._request_id,
+            }
+
+            logger.trace(
+                "Binance unsubscribe: {}",
+                payload,
+            )
+
             await self._ws.send(
-                orjson.dumps(
-                    {
-                        "method": "UNSUBSCRIBE",
-                        "params": [
-                            f"{symbol}@bookTicker",
-                        ],
-                        "id": self._request_id,
-                    }
-                )
+                orjson.dumps(payload).decode(),
             )
 
             del self._subscriptions[symbol]
@@ -157,22 +192,73 @@ class BinanceProvider(BaseProvider):
 
         try:
             async for message in self._ws:
+                # logger.trace(
+                #     "Binance raw message: {}",
+                #     message,
+                # )
+
                 await self._handle_message(message)
+
+        except asyncio.CancelledError:
+            logger.debug(
+                "Binance receive loop cancelled"
+            )
+            raise
+
+        except Exception:
+            logger.exception(
+                "Binance websocket _receive_loop crashed"
+            )
 
         finally:
             self._connected = False
+
+            logger.warning(
+                "Binance websocket disconnected"
+            )
 
     async def _handle_message(
         self,
         message: str | bytes,
     ) -> None:
-        data = orjson.loads(message)
+        try:
+            data = orjson.loads(message)
 
-        # Ignore subscribe/unsubscribe responses
-        if "result" in data:
-            return
+            # logger.trace(
+            #     "Binance parsed message: {}",
+            #     data,
+            # )
 
-        logger.trace(
-            "Binance WS: {}",
-            data,
-        )
+            # subscribe/unsubscribe ack
+            if "result" in data:
+                logger.debug(
+                    "Binance subscription response: {}",
+                    data,
+                )
+                return
+
+            tick = PriceTick(
+                provider=self.name,
+                symbol=data["s"],
+                price=Decimal(data["a"]),  # ask price for now
+                timestamp=datetime.fromtimestamp(
+                    data["E"] / 1000,
+                    UTC,
+                ),
+            )
+
+            await self._dispatcher.publish(
+                PriceUpdatedEvent(
+                    tick=tick,
+                )
+            )
+
+            logger.trace(
+                "Binance market update: {}",
+                data,
+            )
+
+        except Exception:
+            logger.exception(
+                "Failed to handle Binance message"
+            )
