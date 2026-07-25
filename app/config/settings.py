@@ -36,8 +36,10 @@ class Settings(BaseSettings):
 
     admin_bot_token: str = Field(alias="ADMIN_BOT_TOKEN")
     raw_admins: str = Field(alias="ADMINS")
-    signals_channel: int = Field(alias="SIGNALS_CHANNEL")
-    profit_channel: int = Field(alias="PROFIT_CHANNEL")
+    dev_channel: int = Field(alias="DEV_CHANNEL")
+    royal_channel: int = Field(alias="ROYAL_CHANNEL")
+    test_channel: int = Field(alias="TEST_CHANNEL")
+
 
     # =========================
     # Engine
