@@ -1,0 +1,164 @@
+from decimal import Decimal
+
+from app.database.models import Tracking, Signal, SignalEntry
+from app.database.enums import Direction
+from app.market.dto import PriceTick
+
+from app.engine.rules.entry import EntryRule
+from app.engine.rules.waiting_entry import WaitingEntryRule
+from app.engine.rules.stop_loss import StopLossRule
+from app.engine.rules.take_profit import TakeProfitRule
+from app.engine.actions import (
+    WaitingEntryExpired,
+    PositionEntered,
+    StopLossHit,
+    RiskFreed,
+    TrackingCompleted,
+)
+
+
+class Tracker:
+    def __init__(self) -> None:
+        self._waiting_entry = WaitingEntryRule()
+        self._entry = EntryRule()
+        self._stop_loss = StopLossRule()
+        self._take_profit = TakeProfitRule()
+
+    async def track(
+        self,
+        tracking: Tracking,
+        tick: PriceTick,
+    ) -> list:
+        """Execute rules in correct order with explicit control flow."""
+        
+        # Update tracking state BEFORE rules execute
+        self._update_tracking_state(tracking, tick.price)
+        
+        # Get ordered entries
+        first_entry, second_entry = self._get_ordered_entries(tracking.signal)
+        
+        actions = []
+        
+        # 1. Waiting entry timeout (only if not entered)
+        if not tracking.has_entered:
+            waiting_actions = await self._waiting_entry.apply(
+                tracking, tick, first_entry, second_entry
+            )
+            if waiting_actions:
+                actions.extend(waiting_actions)
+                # Expired - no further rules apply
+                return actions
+        
+        # 2. Entry check (only if not entered)
+        if not tracking.has_entered:
+            entry_actions = await self._entry.apply(
+                tracking, tick, first_entry, second_entry
+            )
+            if entry_actions:
+                actions.extend(entry_actions)
+                # Just entered - don't check SL/TP on same tick
+                return actions
+        
+        # 3. Stop loss check (only if entered)
+        if tracking.has_entered:
+            sl_actions = await self._stop_loss.apply(
+                tracking, tick, first_entry, second_entry
+            )
+            if sl_actions:
+                actions.extend(sl_actions)
+                # SL or RiskFreed hit - stop
+                return actions
+        
+        # 4. Take profit check (only if entered and SL not hit)
+        if tracking.has_entered:
+            tp_actions = await self._take_profit.apply(
+                tracking, tick, first_entry, second_entry
+            )
+            if tp_actions:
+                actions.extend(tp_actions)
+                # Check if TrackingCompleted is in actions
+                if any(isinstance(a, TrackingCompleted) for a in tp_actions):
+                    # Completed - stop
+                    return actions
+        
+        return actions
+
+    def _get_ordered_entries(
+        self,
+        signal: Signal,
+    ) -> tuple[SignalEntry | None, SignalEntry | None]:
+        """Calculate first and second entry based on direction.
+        
+        LONG: higher price = first entry, lower price = second entry
+        SHORT: lower price = first entry, higher price = second entry
+        """
+        if not signal.entries:
+            return None, None
+        
+        if len(signal.entries) == 1:
+            return signal.entries[0], None
+        
+        # Sort by price
+        sorted_entries = sorted(signal.entries, key=lambda e: e.price)
+        low = sorted_entries[0]
+        high = sorted_entries[-1]
+        
+        if signal.direction == Direction.LONG:
+            # LONG: higher first, lower second
+            return high, low
+        else:
+            # SHORT: lower first, higher second
+            return low, high
+
+    def _update_tracking_state(
+        self,
+        tracking: Tracking,
+        current_price: Decimal,
+    ) -> None:
+        """Update peak price and halfway flag before rules execute.
+        
+        This runs on EVERY tick, ensuring state is current.
+        """
+        if not tracking.has_entered:
+            return
+        
+        signal = tracking.signal
+        direction = signal.direction
+        
+        # Initialize peak price on first update after entry
+        if tracking.peak_price_after_entry is None:
+            tracking.peak_price_after_entry = current_price
+        
+        # Update peak price
+        if direction == Direction.LONG:
+            tracking.peak_price_after_entry = max(
+                tracking.peak_price_after_entry,
+                current_price
+            )
+        else:
+            tracking.peak_price_after_entry = min(
+                tracking.peak_price_after_entry,
+                current_price
+            )
+        
+        # Check halfway to TP1 (only if not already flagged)
+        if tracking.halfway_to_tp1_reached:
+            return
+        
+        if not signal.targets:
+            return
+        
+        tp1_price = signal.targets[0].price
+        entry = tracking.entry_price
+        
+        if entry is None:
+            return
+        
+        if direction == Direction.LONG:
+            halfway = entry + (tp1_price - entry) / 2
+            if current_price >= halfway:
+                tracking.halfway_to_tp1_reached = True
+        else:
+            halfway = entry - (entry - tp1_price) / 2
+            if current_price <= halfway:
+                tracking.halfway_to_tp1_reached = True

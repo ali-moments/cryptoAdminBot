@@ -2,7 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.database.enums import TrackingStatus
-from app.database.models import Tracking
+from app.database.models import Tracking, Signal
 from app.repositories.base import BaseRepository
 
 
@@ -17,7 +17,8 @@ class TrackingRepository(BaseRepository[Tracking]):
             select(Tracking)
             .where(Tracking.id == tracking_id)
             .options(
-                selectinload(Tracking.signal),
+                selectinload(Tracking.signal).selectinload(Signal.entries),
+                selectinload(Tracking.signal).selectinload(Signal.targets),
                 selectinload(Tracking.tp_hits),
             )
         )
@@ -29,7 +30,8 @@ class TrackingRepository(BaseRepository[Tracking]):
             select(Tracking)
             .where(Tracking.is_active.is_(True))
             .options(
-                selectinload(Tracking.signal),
+                selectinload(Tracking.signal).selectinload(Signal.entries),
+                selectinload(Tracking.signal).selectinload(Signal.targets),
                 selectinload(Tracking.tp_hits),
             )
         )
