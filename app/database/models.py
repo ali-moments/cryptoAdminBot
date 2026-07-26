@@ -314,6 +314,20 @@ class Tracking(IDMixin, TimestampMixin, Base):
         Numeric(12, 4),
     )
 
+    # Execution state fields
+    entry_price: Mapped[Decimal | None] = mapped_column(
+        Numeric(20, 8),
+    )
+
+    peak_price_after_entry: Mapped[Decimal | None] = mapped_column(
+        Numeric(20, 8),
+    )
+
+    halfway_to_tp1_reached: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+    )
+
     version: Mapped[int] = mapped_column(
         default=1,
     )
@@ -321,6 +335,11 @@ class Tracking(IDMixin, TimestampMixin, Base):
     signal: Mapped["Signal"] = relationship(
         back_populates="tracking",
     )
+
+    @property
+    def has_entered(self) -> bool:
+        """Derived property - single source of truth from entry touched flags."""
+        return self.entry1_touched or self.entry2_touched
 
     tp_hits: Mapped[list["TpHit"]] = relationship(
         back_populates="tracking",
