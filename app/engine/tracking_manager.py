@@ -4,7 +4,7 @@ from collections import defaultdict
 from app.database.uow import UnitOfWork
 from app.engine.tracker import Tracker
 from app.market.cache import PriceCache
-from app.engine.tracking_handler import TrackingHandler
+from app.engine.action_processor import ActionProcessor
 
 
 class TrackingManager:
@@ -18,13 +18,13 @@ class TrackingManager:
         self,
         uow: UnitOfWork,
         tracker: Tracker,
-        handler: TrackingHandler,
+        processor: ActionProcessor,
         cache: PriceCache,
         interval: float = 2.0,
     ) -> None:
         self._uow = uow
         self._tracker = tracker
-        self._handler = handler
+        self._processor = processor
         self._cache = cache
 
         self._interval = interval
@@ -75,7 +75,7 @@ class TrackingManager:
         - Opens UnitOfWork
         - Loads trackings (objects attached to session)
         - Tracker updates state (tracked by SQLAlchemy)
-        - Handler processes actions (mutates attached objects)
+        - ActionProcessor processes actions (mutates attached objects)
         - Commits all changes atomically
         """
         async with self._uow:
@@ -106,15 +106,15 @@ class TrackingManager:
                     if not actions:
                         continue
 
-                    # Handler processes actions
+                    # ActionProcessor processes actions
                     # Mutates the same tracking object
-                    await self._handler.handle(
+                    await self._processor.process(
                         tracking,
                         actions,
                     )
 
             # Commit all changes atomically
             # - Tracker state updates
-            # - Handler action processing
+            # - ActionProcessor action processing
             # - All persisted together
             await self._uow.commit()

@@ -25,5 +25,5 @@ pyrightconfig.json
 .kiro/
 
 # docs (because they are not completed yet)
-docs/*
+#docs/*
 todo.txt
