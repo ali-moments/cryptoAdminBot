@@ -17,6 +17,7 @@ class SignalStatus(str, Enum):
 class TrackingStatus(str, Enum):
     WAITING_ENTRY = "WAITING_ENTRY"
     TRACKING = "TRACKING"
+    RISK_FREE = "RISK_FREE"
     CLOSED = "CLOSED"
     CANCELLED = "CANCELLED"
 

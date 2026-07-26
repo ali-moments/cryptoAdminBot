@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     SmallInteger,
     UniqueConstraint,
+    Index,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -272,7 +273,6 @@ class Tracking(IDMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
-        index=True,
     )
 
     started_at: Mapped[datetime | None] = mapped_column(
@@ -325,6 +325,14 @@ class Tracking(IDMixin, TimestampMixin, Base):
     tp_hits: Mapped[list["TpHit"]] = relationship(
         back_populates="tracking",
         cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_trackings_active",
+            "id",
+            postgresql_where=is_active.is_(True),
+        ),
     )
 
 
