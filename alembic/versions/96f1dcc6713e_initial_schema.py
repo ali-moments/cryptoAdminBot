@@ -1,8 +1,8 @@
-"""initial schema
+"""initial_schema
 
-Revision ID: f95bcfd8086f
-Revises:
-Create Date: 2026-07-15 00:10:03.242948
+Revision ID: 96f1dcc6713e
+Revises: 
+Create Date: 2026-07-31 04:57:18.802625
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = 'f95bcfd8086f'
+revision: str = '96f1dcc6713e'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -88,19 +88,24 @@ def upgrade() -> None:
     op.create_index(op.f('ix_signal_targets_signal_id'), 'signal_targets', ['signal_id'], unique=False)
     op.create_table('trackings',
     sa.Column('signal_id', sa.Integer(), nullable=False),
-    sa.Column('status', sa.Enum('WAITING_ENTRY', 'TRACKING', 'CLOSED', 'CANCELLED', name='tracking_status_enum'), nullable=False),
+    sa.Column('status', sa.Enum('WAITING_ENTRY', 'TRACKING', 'RISK_FREE', 'CLOSED', 'CANCELLED', name='tracking_status_enum'), nullable=False),
     sa.Column('provider', sa.Enum('BINANCE', 'BYBIT', 'OKX', name='provider_enum'), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('closed_at', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('last_processed_price', sa.Numeric(precision=20, scale=8), nullable=True),
     sa.Column('entry1_touched', sa.Boolean(), nullable=False),
     sa.Column('entry2_touched', sa.Boolean(), nullable=False),
+    sa.Column('actual_entry_price', sa.Numeric(precision=20, scale=8), nullable=True),
+    sa.Column('entry_method', sa.Enum('ENTRY_1', 'EMERGENCY_ENTRY', name='entry_method_enum'), nullable=True),
+    sa.Column('emergency_entry_triggered_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('current_tp1_price', sa.Numeric(precision=20, scale=8), nullable=True),
     sa.Column('current_stop_loss', sa.Numeric(precision=20, scale=8), nullable=False),
     sa.Column('highest_target_hit', sa.SmallInteger(), nullable=False),
     sa.Column('close_reason', sa.Enum('ORIGINAL_STOP_LOSS', 'MOVED_STOP_LOSS', 'ALL_TARGETS_HIT', 'CANCELLED', 'EXPIRED', name='close_reason_enum'), nullable=True),
     sa.Column('final_price', sa.Numeric(precision=20, scale=8), nullable=True),
     sa.Column('profit_percent', sa.Numeric(precision=12, scale=4), nullable=True),
+    sa.Column('peak_price_after_entry', sa.Numeric(precision=20, scale=8), nullable=True),
+    sa.Column('halfway_to_tp1_reached', sa.Boolean(), nullable=False),
     sa.Column('version', sa.Integer(), nullable=False),
     sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
@@ -108,13 +113,12 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['signal_id'], ['signals.id'], name=op.f('fk_trackings_signal_id_signals'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_trackings'))
     )
-    #op.create_index(op.f('ix_trackings_is_active'), 'trackings', ['is_active'], unique=False)
-    op.create_index(op.f('ix_trackings_active'), 'trackings', ['id'], unique=False, postgresql_where=sa.text("is_active = true"))
+    op.create_index('ix_trackings_active', 'trackings', ['id'], unique=False, postgresql_where=sa.text('is_active IS true'))
     op.create_index(op.f('ix_trackings_signal_id'), 'trackings', ['signal_id'], unique=True)
     op.create_table('audit_logs',
     sa.Column('signal_id', sa.Integer(), nullable=True),
     sa.Column('tracking_id', sa.Integer(), nullable=True),
-    sa.Column('event', sa.Enum('SIGNAL_RECEIVED', 'SIGNAL_REJECTED', 'SIGNAL_PUBLISHED', 'WAITING_FOR_ENTRY', 'TRACKING_STARTED', 'ENTRY1_HIT', 'ENTRY2_HIT', 'STOP_LOSS_MOVED', 'TARGET_HIT', 'SIGNAL_CLOSED', 'SIGNAL_EXPIRED', 'PROVIDER_SWITCHED', 'ENGINE_RECOVERY', 'ERROR', name='audit_event_type_enum'), nullable=False),
+    sa.Column('event', sa.Enum('SIGNAL_RECEIVED', 'SIGNAL_REJECTED', 'SIGNAL_PUBLISHED', 'WAITING_FOR_ENTRY', 'TRACKING_STARTED', 'ENTRY1_HIT', 'ENTRY2_HIT', 'EMERGENCY_ENTRY_HIT', 'TP1_RECALCULATED', 'STOP_LOSS_MOVED', 'TARGET_HIT', 'SIGNAL_CLOSED', 'SIGNAL_EXPIRED', 'PROVIDER_SWITCHED', 'ENGINE_RECOVERY', 'ERROR', name='audit_event_type_enum'), nullable=False),
     sa.Column('payload', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
@@ -169,8 +173,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_audit_logs_signal_id'), table_name='audit_logs')
     op.drop_table('audit_logs')
     op.drop_index(op.f('ix_trackings_signal_id'), table_name='trackings')
-    #op.drop_index(op.f('ix_trackings_is_active'), table_name='trackings')
-    op.drop_index(op.f('ix_trackings_active'), table_name='trackings')
+    op.drop_index('ix_trackings_active', table_name='trackings', postgresql_where=sa.text('is_active IS true'))
     op.drop_table('trackings')
     op.drop_index(op.f('ix_signal_targets_signal_id'), table_name='signal_targets')
     op.drop_table('signal_targets')
