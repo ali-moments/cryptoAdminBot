@@ -6,6 +6,11 @@ class Direction(str, Enum):
     SHORT = "SHORT"
 
 
+class EntryMethod(str, Enum):
+    ENTRY_1 = "ENTRY_1"
+    EMERGENCY_ENTRY = "EMERGENCY_ENTRY"
+
+
 class SignalStatus(str, Enum):
     WAITING_ENTRY = "WAITING_ENTRY"
     TRACKING = "TRACKING"
@@ -61,6 +66,10 @@ class AuditEventType(str, Enum):
     ENTRY1_HIT = "ENTRY1_HIT"
 
     ENTRY2_HIT = "ENTRY2_HIT"
+
+    EMERGENCY_ENTRY_HIT = "EMERGENCY_ENTRY_HIT"
+
+    TP1_RECALCULATED = "TP1_RECALCULATED"
 
     STOP_LOSS_MOVED = "STOP_LOSS_MOVED"
 

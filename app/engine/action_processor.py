@@ -1,7 +1,7 @@
 import logging
 from decimal import Decimal
 
-from app.database.enums import TrackingStatus, AuditEventType, Direction
+from app.database.enums import TrackingStatus, AuditEventType, Direction, EntryMethod
 from app.database.models import Tracking
 from app.database.uow import UnitOfWork
 from app.engine.actions import (
@@ -11,6 +11,7 @@ from app.engine.actions import (
     TakeProfitHit,
     RiskFreed,
     TrackingCompleted,
+    EntryType,
 )
 
 
@@ -78,11 +79,14 @@ class ActionProcessor:
         """Check if action was already processed using existing state."""
         match action:
             case PositionEntered():
-                # Check entry touched flags
-                if action.entry_number == 1:
+                # Check based on entry type
+                if action.entry_type == EntryType.ENTRY_1:
                     return tracking.entry1_touched
-                else:
+                elif action.entry_type == EntryType.ENTRY_2:
                     return tracking.entry2_touched
+                elif action.entry_type == EntryType.EMERGENCY_ENTRY:
+                    return tracking.entry_method == EntryMethod.EMERGENCY_ENTRY
+                return False
 
             case TakeProfitHit():
                 # Query database for existing TpHit record
@@ -104,52 +108,163 @@ class ActionProcessor:
         tracking: Tracking,
         action: PositionEntered,
     ) -> None:
-        """Handle position entry."""
-        # Update tracking state
-        if action.entry_number == 1:
+        """Handle position entry.
+        
+        Entry types:
+        - ENTRY_1: Initial entry at entry1 price
+        - ENTRY_2: Scaling entry at entry2 price (triggers TP1 recalculation)
+        - EMERGENCY_ENTRY: Fallback entry after timeout
+        """
+        signal = tracking.signal
+        
+        if action.entry_type == EntryType.ENTRY_1:
+            # ============================================================
+            # ENTRY_1: Initial position entry
+            # ============================================================
             tracking.entry1_touched = True
-        else:
-            tracking.entry2_touched = True
-
-        # Store the actual executed entry price (first entry only)
-        if tracking.entry_price is None:
-            tracking.entry_price = action.price
-
-        # Initialize peak price tracking
-        if tracking.peak_price_after_entry is None:
+            tracking.entry_method = EntryMethod.ENTRY_1
+            tracking.actual_entry_price = action.price
+            tracking.status = TrackingStatus.TRACKING
+            
+            # Initialize peak price tracking
             tracking.peak_price_after_entry = action.price
-
-        tracking.status = TrackingStatus.TRACKING
-
-        # Write audit log
-        await self._uow.audit_logs.create(
-            tracking_id=tracking.id,
-            signal_id=tracking.signal_id,
-            event=AuditEventType.ENTRY1_HIT if action.entry_number == 1 else AuditEventType.ENTRY2_HIT,
-            payload={
-                "entry_number": action.entry_number,
-                "price": str(action.price),
-                "timestamp": action.timestamp.isoformat(),
-            },
-        )
-
-        # Log event
-        logger.info(
-            "Entry %d hit: tracking=%d signal=%d symbol=%s price=%s",
-            action.entry_number,
-            tracking.id,
-            tracking.signal_id,
-            tracking.signal.symbol,
-            action.price,
-        )
-        # TODO: Send Telegram notification: ENTRY1_HIT or ENTRY2_HIT
+            
+            # Write audit log
+            await self._uow.audit_logs.create(
+                tracking_id=tracking.id,
+                signal_id=tracking.signal_id,
+                event=AuditEventType.ENTRY1_HIT,
+                payload={
+                    "entry_type": "ENTRY_1",
+                    "price": str(action.price),
+                    "timestamp": action.timestamp.isoformat(),
+                },
+            )
+            
+            logger.info(
+                "Entry1 hit: tracking=%d signal=%d symbol=%s price=%s",
+                tracking.id,
+                tracking.signal_id,
+                signal.symbol,
+                action.price,
+            )
+        
+        elif action.entry_type == EntryType.ENTRY_2:
+            # ============================================================
+            # ENTRY_2: Scaling entry (DCA)
+            # ============================================================
+            tracking.entry2_touched = True
+            
+            # Recalculate TP1
+            # Formula: current_tp1 = EntryHigh + (original_tp1 - EntryHigh) / 2
+            # EntryHigh is always the higher absolute price
+            if signal.targets and len(signal.entries) >= 2:
+                # Determine EntryHigh based on entry prices
+                sorted_entries = sorted(signal.entries, key=lambda e: e.price)
+                entry_high_price = sorted_entries[-1].price  # Higher price
+                
+                original_tp1 = signal.targets[0].price
+                
+                # Calculate new TP1 (halfway between EntryHigh and original TP1)
+                new_tp1 = entry_high_price + (original_tp1 - entry_high_price) / Decimal("2")
+                tracking.current_tp1_price = new_tp1
+                
+                # Write TP1 recalculation audit log
+                await self._uow.audit_logs.create(
+                    tracking_id=tracking.id,
+                    signal_id=tracking.signal_id,
+                    event=AuditEventType.TP1_RECALCULATED,
+                    payload={
+                        "original_tp1": str(original_tp1),
+                        "new_tp1": str(new_tp1),
+                        "entry_high": str(entry_high_price),
+                        "entry_low_touched": str(action.price),
+                        "timestamp": action.timestamp.isoformat(),
+                    },
+                )
+                
+                logger.info(
+                    "TP1 recalculated: tracking=%d original_tp1=%s new_tp1=%s entry_high=%s",
+                    tracking.id,
+                    original_tp1,
+                    new_tp1,
+                    entry_high_price,
+                )
+            
+            # Write entry2 audit log
+            await self._uow.audit_logs.create(
+                tracking_id=tracking.id,
+                signal_id=tracking.signal_id,
+                event=AuditEventType.ENTRY2_HIT,
+                payload={
+                    "entry_type": "ENTRY_2",
+                    "price": str(action.price),
+                    "timestamp": action.timestamp.isoformat(),
+                },
+            )
+            
+            logger.info(
+                "Entry2 hit: tracking=%d signal=%d symbol=%s price=%s",
+                tracking.id,
+                tracking.signal_id,
+                signal.symbol,
+                action.price,
+            )
+        
+        elif action.entry_type == EntryType.EMERGENCY_ENTRY:
+            # ============================================================
+            # EMERGENCY_ENTRY: Fallback entry after timeout
+            # ============================================================
+            tracking.entry1_touched = True  # Mark as entered via emergency
+            tracking.entry_method = EntryMethod.EMERGENCY_ENTRY
+            tracking.actual_entry_price = action.price
+            tracking.emergency_entry_triggered_at = action.timestamp
+            tracking.status = TrackingStatus.TRACKING
+            
+            # Initialize peak price tracking
+            tracking.peak_price_after_entry = action.price
+            
+            # Calculate emergency entry price for audit log (debugging)
+            # This is the same deterministic calculation used by EntryRule
+            calculated_emergency_price = self._calculate_emergency_entry_price_for_audit(
+                signal=signal,
+            )
+            
+            # Write audit log
+            await self._uow.audit_logs.create(
+                tracking_id=tracking.id,
+                signal_id=tracking.signal_id,
+                event=AuditEventType.EMERGENCY_ENTRY_HIT,
+                payload={
+                    "entry_type": "EMERGENCY_ENTRY",
+                    "price": str(action.price),
+                    "calculated_emergency_price": str(calculated_emergency_price) if calculated_emergency_price else None,
+                    "timestamp": action.timestamp.isoformat(),
+                },
+            )
+            
+            logger.info(
+                "Emergency entry hit: tracking=%d signal=%d symbol=%s price=%s calculated_emergency=%s",
+                tracking.id,
+                tracking.signal_id,
+                signal.symbol,
+                action.price,
+                calculated_emergency_price,
+            )
+        
+        # TODO: Send Telegram notification based on entry type
 
     async def _waiting_entry_expired(
         self,
         tracking: Tracking,
         action: WaitingEntryExpired,
     ) -> None:
-        """Handle waiting entry expiration."""
+        """Handle waiting entry expiration.
+        
+        Reasons:
+        - timeout: Signal expired after configured timeout
+        - tp1_crossed: TP1 reached before entry (signal opportunity missed)
+        """
         # Update tracking state
         tracking.status = TrackingStatus.CANCELLED
         tracking.is_active = False
@@ -161,16 +276,18 @@ class ActionProcessor:
             signal_id=tracking.signal_id,
             event=AuditEventType.SIGNAL_EXPIRED,
             payload={
+                "reason": action.reason,
                 "timestamp": action.timestamp.isoformat(),
             },
         )
 
         # Log event
         logger.info(
-            "Waiting entry expired: tracking=%d signal=%d symbol=%s",
+            "Waiting entry expired: tracking=%d signal=%d symbol=%s reason=%s",
             tracking.id,
             tracking.signal_id,
             tracking.signal.symbol,
+            action.reason,
         )
         # TODO: Send Telegram notification: SIGNAL_CANCELLED
         # TODO: Update statistics
@@ -216,10 +333,10 @@ class ActionProcessor:
     ) -> None:
         """Handle take profit hit."""
         # Calculate profit percentage
-        if tracking.entry_price:
+        if tracking.actual_entry_price:
             profit_pct = self._calculate_profit_percentage(
                 tracking.signal.direction,
-                tracking.entry_price,
+                tracking.actual_entry_price,
                 action.price,
             )
         else:
@@ -342,3 +459,37 @@ class ActionProcessor:
             profit = ((entry_price - exit_price) / entry_price) * Decimal("100")
 
         return profit.quantize(Decimal("0.01"))
+
+    def _calculate_emergency_entry_price_for_audit(
+        self,
+        signal,
+    ) -> Decimal | None:
+        """
+        Calculate emergency entry price for audit logging purposes.
+        
+        This duplicates the logic from EntryRule for diagnostic purposes.
+        The actual business logic uses EntryRule's calculation.
+        
+        Formula:
+        - LONG: emergency = tp1 + (tp1 - EntryHigh) / 4
+        - SHORT: emergency = tp1 - (EntryHigh - tp1) / 4
+        
+        EntryHigh is always the higher absolute price.
+        """
+        if not signal.entries or not signal.targets:
+            return None
+        
+        # EntryHigh is always the higher price
+        sorted_entries = sorted(signal.entries, key=lambda e: e.price)
+        entry_high_price = sorted_entries[-1].price
+        
+        tp1_price = signal.targets[0].price
+        direction = signal.direction
+        
+        distance = abs(tp1_price - entry_high_price)
+        quarter_distance = distance / Decimal("4")
+        
+        if direction == Direction.LONG:
+            return tp1_price + quarter_distance
+        else:
+            return tp1_price - quarter_distance

@@ -49,14 +49,14 @@ class Tracker:
                 # Expired - no further rules apply
                 return actions
         
-        # 2. Entry check (only if not entered)
-        if not tracking.has_entered:
-            entry_actions = await self._entry.apply(
-                tracking, tick, first_entry, second_entry
-            )
-            if entry_actions:
-                actions.extend(entry_actions)
-                # Just entered - don't check SL/TP on same tick
+        # 2. Entry check
+        entry_actions = await self._entry.apply(
+            tracking, tick, first_entry, second_entry
+        )
+        if entry_actions:
+            actions.extend(entry_actions)
+            # Just entered first position - don't check SL/TP on same tick
+            if not tracking.has_entered:
                 return actions
         
         # 3. Stop loss check (only if entered)
@@ -148,8 +148,9 @@ class Tracker:
         if not signal.targets:
             return
         
-        tp1_price = signal.targets[0].price
-        entry = tracking.entry_price
+        # Use current_tp1_price if TP1 was recalculated, otherwise use original TP1
+        tp1_price = tracking.current_tp1_price if tracking.current_tp1_price else signal.targets[0].price
+        entry = tracking.actual_entry_price
         
         if entry is None:
             return

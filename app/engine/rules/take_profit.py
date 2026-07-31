@@ -32,10 +32,15 @@ class TakeProfitRule:
             if target.position <= tracking.highest_target_hit:
                 continue
 
+            # Use current_tp1_price if TP1 was recalculated (entry2 was hit)
+            target_price = target.price
+            if target.position == 1 and tracking.current_tp1_price is not None:
+                target_price = tracking.current_tp1_price
+
             if direction == Direction.LONG:
-                hit = current_price >= target.price
+                hit = current_price >= target_price
             else:
-                hit = current_price <= target.price
+                hit = current_price <= target_price
 
             if not hit:
                 break
@@ -43,7 +48,7 @@ class TakeProfitRule:
             actions.append(
                 TakeProfitHit(
                     target_number=target.position,
-                    price=target.price,
+                    price=target_price,
                     timestamp=tick.timestamp,
                 )
             )

@@ -27,6 +27,7 @@ class WaitingEntryRule:
         if tick.timestamp >= signal.created_at + self.WAITING_TIMEOUT:
             return [
                 WaitingEntryExpired(
+                    reason="timeout",
                     timestamp=tick.timestamp,
                 )
             ]

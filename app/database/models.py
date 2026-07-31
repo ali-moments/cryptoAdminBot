@@ -21,7 +21,7 @@ from app.database.base import (
     Base, IDMixin, TimestampMixin, CreatedAtMixin, UUIDMixin
 )
 from app.database.enums import (
-    Direction, SignalStatus, CloseReason, Provider, TrackingStatus, MessageType, AuditEventType
+    Direction, SignalStatus, CloseReason, Provider, TrackingStatus, MessageType, AuditEventType, EntryMethod
 )
 
 DIRECTION_ENUM = Enum(Direction, name="direction_enum")
@@ -31,6 +31,7 @@ PROVIDER_ENUM = Enum(Provider, name="provider_enum")
 TRACKING_STATUS_ENUM = Enum(TrackingStatus, name="tracking_status_enum")
 MESSAGE_TYPE_ENUM = Enum(MessageType, name="message_type_enum")
 AUDIT_EVENT_TYPE_ENUM = Enum(AuditEventType, name="audit_event_type_enum")
+ENTRY_METHOD_ENUM = Enum(EntryMethod, name="entry_method_enum")
 
 
 # ==============================================================================
@@ -283,16 +284,30 @@ class Tracking(IDMixin, TimestampMixin, Base):
         DateTime(timezone=True),
     )
 
-    last_processed_price: Mapped[Decimal | None] = mapped_column(
-        Numeric(20, 8),
-    )
-
     entry1_touched: Mapped[bool] = mapped_column(
         default=False,
     )
 
     entry2_touched: Mapped[bool] = mapped_column(
         default=False,
+    )
+
+    # Entry tracking: how position was opened and at what price
+    actual_entry_price: Mapped[Decimal | None] = mapped_column(
+        Numeric(20, 8),
+    )
+
+    entry_method: Mapped[EntryMethod | None] = mapped_column(
+        ENTRY_METHOD_ENUM,
+    )
+
+    emergency_entry_triggered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
+
+    # TP1 recalculation tracking (when entry2 is hit)
+    current_tp1_price: Mapped[Decimal | None] = mapped_column(
+        Numeric(20, 8),
     )
 
     current_stop_loss: Mapped[Decimal] = mapped_column(
@@ -314,11 +329,7 @@ class Tracking(IDMixin, TimestampMixin, Base):
         Numeric(12, 4),
     )
 
-    # Execution state fields
-    entry_price: Mapped[Decimal | None] = mapped_column(
-        Numeric(20, 8),
-    )
-
+    # Risk-free tracking
     peak_price_after_entry: Mapped[Decimal | None] = mapped_column(
         Numeric(20, 8),
     )
