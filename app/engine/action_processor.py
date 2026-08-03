@@ -156,17 +156,25 @@ class ActionProcessor:
             tracking.entry2_touched = True
             
             # Recalculate TP1
-            # Formula: current_tp1 = EntryHigh + (original_tp1 - EntryHigh) / 2
-            # EntryHigh is always the higher absolute price
+            # Formula: new_tp1 = FirstEntry + (original_tp1 - FirstEntry) / 2
+            # FirstEntry is direction-dependent:
+            #   - LONG: higher price (market approaches from above)
+            #   - SHORT: lower price (market approaches from below)
             if signal.targets and len(signal.entries) >= 2:
-                # Determine EntryHigh based on entry prices
+                # Determine FirstEntry based on direction
                 sorted_entries = sorted(signal.entries, key=lambda e: e.price)
-                entry_high_price = sorted_entries[-1].price  # Higher price
+                
+                if signal.direction == Direction.LONG:
+                    # LONG: first entry is higher price
+                    first_entry_price = sorted_entries[-1].price
+                else:
+                    # SHORT: first entry is lower price
+                    first_entry_price = sorted_entries[0].price
                 
                 original_tp1 = signal.targets[0].price
                 
-                # Calculate new TP1 (halfway between EntryHigh and original TP1)
-                new_tp1 = entry_high_price + (original_tp1 - entry_high_price) / Decimal("2")
+                # Calculate new TP1 (halfway between FirstEntry and original TP1)
+                new_tp1 = first_entry_price + (original_tp1 - first_entry_price) / Decimal("2")
                 tracking.current_tp1_price = new_tp1
                 
                 # Write TP1 recalculation audit log
@@ -177,18 +185,18 @@ class ActionProcessor:
                     payload={
                         "original_tp1": str(original_tp1),
                         "new_tp1": str(new_tp1),
-                        "entry_high": str(entry_high_price),
+                        "first_entry": str(first_entry_price),
                         "entry_low_touched": str(action.price),
                         "timestamp": action.timestamp.isoformat(),
                     },
                 )
                 
                 logger.info(
-                    "TP1 recalculated: tracking=%d original_tp1=%s new_tp1=%s entry_high=%s",
+                    "TP1 recalculated: tracking=%d original_tp1=%s new_tp1=%s first_entry=%s",
                     tracking.id,
                     original_tp1,
                     new_tp1,
-                    entry_high_price,
+                    first_entry_price,
                 )
             
             # Write entry2 audit log
@@ -214,6 +222,9 @@ class ActionProcessor:
         elif action.entry_type == EntryType.EMERGENCY_ENTRY:
             # ============================================================
             # EMERGENCY_ENTRY: Fallback entry after timeout
+            # Business Rule: Emergency Entry sets entry1_touched = True
+            # entry1_touched means "initial entry state reached", not
+            # necessarily that EntryHigh price was physically touched.
             # ============================================================
             tracking.entry1_touched = True  # Mark as entered via emergency
             tracking.entry_method = EntryMethod.EMERGENCY_ENTRY

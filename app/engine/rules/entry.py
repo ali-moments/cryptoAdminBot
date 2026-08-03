@@ -11,18 +11,26 @@ class EntryRule:
     """
     Entry detection rule implementing the entry state machine.
     
+    Business Rules:
+    - EntryHigh is the initial entry (higher price for LONG, lower for SHORT)
+    - EntryLow is the averaging entry (lower price for LONG, higher for SHORT)
+    - EntryLow only valid before any TP hit (highest_target_hit == 0)
+    - EntryLow can fire after Entry1 OR Emergency Entry
+    - Emergency Entry available after 5min timeout if EntryHigh not touched
+    - Gap behavior: If both entries crossed in one tick, both fire
+    
     State transitions:
     
     WAITING_ENTRY
         │
-        ├─→ Entry1 hit → TRACKING (ENTRY_1)
-        │       └─→ Entry2 allowed
+        ├─→ EntryHigh hit → TRACKING (ENTRY_1)
+        │       └─→ EntryLow allowed (if highest_target_hit == 0)
         │
-        ├─→ 5min timeout + TP1 not crossed → Emergency entry eligible
+        ├─→ 5min timeout + EntryHigh not touched → Emergency mode
         │       └─→ Emergency price hit → TRACKING (EMERGENCY_ENTRY)
-        │               └─→ Entry2 NOT allowed
+        │               └─→ EntryLow allowed (if highest_target_hit == 0)
         │
-        └─→ TP1 crossed → CANCELLED (signal missed)
+        └─→ TP1 crossed before entry → CANCELLED (signal missed)
     """
     
     # Emergency entry timeout
@@ -72,6 +80,9 @@ class EntryRule:
         
         This method is pure - it inspects state and returns actions.
         It never mutates the tracking object.
+        
+        Business Rule: If price crosses both EntryHigh and EntryLow in single tick,
+        both entries must be detected and returned as separate actions.
         """
         signal = tracking.signal
         direction = signal.direction
@@ -97,7 +108,31 @@ class EntryRule:
                 ]
         
         # ============================================================
-        # Check 2: Entry1 hit?
+        # Check 2: Gap scenario - both entries crossed in single tick
+        # ============================================================
+        second_entry = self._get_second_entry(signal)
+        
+        if first_entry and second_entry:
+            entry1_hit = self._entry_hit(direction, current_price, first_entry.price)
+            entry2_hit = self._entry_hit(direction, current_price, second_entry.price)
+            
+            if entry1_hit and entry2_hit:
+                # Gap detected - return both actions in order
+                return [
+                    PositionEntered(
+                        entry_type=EntryType.ENTRY_1,
+                        price=first_entry.price,
+                        timestamp=current_time,
+                    ),
+                    PositionEntered(
+                        entry_type=EntryType.ENTRY_2,
+                        price=second_entry.price,
+                        timestamp=current_time,
+                    ),
+                ]
+        
+        # ============================================================
+        # Check 3: Entry1 only
         # ============================================================
         if first_entry and self._entry_hit(direction, current_price, first_entry.price):
             return [
@@ -109,7 +144,7 @@ class EntryRule:
             ]
         
         # ============================================================
-        # Check 3: Emergency entry conditions
+        # Check 4: Emergency entry conditions
         # ============================================================
         if emergency_mode_active:
             # Calculate emergency entry price on-demand (deterministic)
@@ -147,10 +182,21 @@ class EntryRule:
         current_time,
         second_entry: SignalEntry | None,
     ) -> list[PositionEntered]:
-        """Handle entry2 detection after position is active."""
+        """Handle entry2 (EntryLow) detection after position is active.
         
-        # Entry2 only allowed after ENTRY_1 (not after EMERGENCY_ENTRY)
-        if tracking.entry_method != EntryMethod.ENTRY_1:
+        Business Rule: EntryLow is only valid during entry phase.
+        EntryLow becomes permanently disabled once any TP has been hit.
+        
+        EntryLow can trigger after ENTRY_1 OR EMERGENCY_ENTRY.
+        Entry method does NOT determine whether EntryLow is allowed.
+        """
+        
+        # Entry phase ended? (any TP hit)
+        if tracking.highest_target_hit > 0:
+            return []
+        
+        # Must have entered already
+        if not tracking.has_entered:
             return []
         
         # Entry2 already touched?
@@ -238,3 +284,21 @@ class EntryRule:
             # Emergency entry below TP1
             return tp1_price - quarter_distance
 
+
+    def _get_second_entry(self, signal) -> SignalEntry | None:
+        """Get second entry (EntryLow) based on direction.
+        
+        LONG: EntryLow is the lower price
+        SHORT: EntryLow is the higher price
+        """
+        if not signal.entries or len(signal.entries) < 2:
+            return None
+        
+        sorted_entries = sorted(signal.entries, key=lambda e: e.price)
+        
+        if signal.direction == Direction.LONG:
+            # LONG: lower price is EntryLow
+            return sorted_entries[0]
+        else:
+            # SHORT: higher price is EntryLow
+            return sorted_entries[-1]

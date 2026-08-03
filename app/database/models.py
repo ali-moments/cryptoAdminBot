@@ -285,11 +285,15 @@ class Tracking(IDMixin, TimestampMixin, Base):
     )
 
     entry1_touched: Mapped[bool] = mapped_column(
+        Boolean,
         default=False,
+        comment="True when initial entry state reached: EntryHigh touched, startup past EntryHigh, or Emergency Entry. Does NOT necessarily mean EntryHigh price was physically touched - check entry_method to determine how entry occurred."
     )
 
     entry2_touched: Mapped[bool] = mapped_column(
+        Boolean,
         default=False,
+        comment="True only when EntryLow (averaging entry) was physically touched before any TP. Emergency Entry and startup never set this flag."
     )
 
     # Entry tracking: how position was opened and at what price
@@ -349,7 +353,14 @@ class Tracking(IDMixin, TimestampMixin, Base):
 
     @property
     def has_entered(self) -> bool:
-        """Derived property - single source of truth from entry touched flags."""
+        """Position has entered (any method).
+        
+        Business Rule: Derived from entry flags.
+        - entry1_touched = True for EntryHigh touch, startup past EntryHigh, or Emergency Entry
+        - entry2_touched = True only for physical EntryLow touch
+        
+        Returns True if either flag is True, meaning position exists.
+        """
         return self.entry1_touched or self.entry2_touched
 
     tp_hits: Mapped[list["TpHit"]] = relationship(

@@ -203,14 +203,15 @@ def current_time():
 @pytest.mark.asyncio
 async def test_emergency_entry_lifecycle(async_engine, price_cache, tracker, current_time):
     """
-    Test emergency entry scenario:
+    Test emergency entry scenario with Entry2 allowed:
     
     1. Signal created → WAITING_ENTRY
     2. Entry1 missed, 5 minutes pass → emergency entry calculated
     3. Emergency entry hit → PositionEntered (EMERGENCY_ENTRY)
-    4. Entry2 should NOT trigger after emergency entry
-    5. TP progression (TP1, TP2)
-    6. Stop loss hit → CLOSED
+    4. Entry2 CAN trigger after emergency entry (updated business rule)
+    5. TP1 recalculated when Entry2 fires
+    6. TP progression (TP1 recalculated, TP2)
+    7. Stop loss hit → CLOSED
     """
     source = await create_test_source(1)
     
@@ -279,16 +280,23 @@ async def test_emergency_entry_lifecycle(async_engine, price_cache, tracker, cur
             emergency_logs = [log for log in logs if log.event == AuditEventType.EMERGENCY_ENTRY_HIT]
             assert len(emergency_logs) == 1
         
-        # Step 5: IMPORTANT - Feed entry2 price, should be IGNORED after emergency entry
+        # Step 5: Feed entry2 price - SHOULD trigger after emergency (new business rule)
         feed_price(price_cache, "BTCUSDT", Decimal("49000"), emergency_time + timedelta(seconds=10))
         await run_tracking_tick(price_cache, tracker)
         
         async with UnitOfWork() as uow:
             tracking = await uow.trackings.get_full(tracking_id)
-            assert tracking.entry2_touched is False, "Entry2 should NOT trigger after emergency entry"
+            # Business Rule: Entry2 CAN trigger after emergency entry (as long as no TP hit yet)
+            assert tracking.entry2_touched is True, "Entry2 should trigger after emergency entry"
+            
+            # TP1 should be recalculated
+            # EntryHigh = 50000, original TP1 = 52000
+            # new_tp1 = 50000 + (52000 - 50000) / 2 = 50000 + 1000 = 51000
+            expected_new_tp1 = Decimal("51000")
+            assert tracking.current_tp1_price == expected_new_tp1
         
-        # Step 6: TP progression - Hit TP1
-        feed_price(price_cache, "BTCUSDT", Decimal("52000"), emergency_time + timedelta(minutes=1))
+        # Step 6: TP progression - Hit TP1 (recalculated)
+        feed_price(price_cache, "BTCUSDT", Decimal("51000"), emergency_time + timedelta(minutes=1))
         await run_tracking_tick(price_cache, tracker)
         
         async with UnitOfWork() as uow:
@@ -299,7 +307,7 @@ async def test_emergency_entry_lifecycle(async_engine, price_cache, tracker, cur
             tp_hits = await uow.tp_hits.by_tracking(tracking_id)
             assert len(tp_hits) == 1
             assert tp_hits[0].position == 1
-            assert tp_hits[0].price == Decimal("52000")
+            assert tp_hits[0].price == Decimal("51000")  # Recalculated TP1
         
         # Hit TP2
         feed_price(price_cache, "BTCUSDT", Decimal("54000"), emergency_time + timedelta(minutes=2))
@@ -1270,3 +1278,363 @@ async def test_emergency_entry_price_calculation(async_engine, price_cache, trac
     finally:
         # Ensure cleanup if test fails
         pass
+
+
+
+# ===========================================================================
+# Test 14: Gap Behavior LONG
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_gap_behavior_long(async_engine, price_cache, tracker, current_time):
+    """
+    Test gap behavior for LONG signal.
+    
+    Business Rule: If price crosses both EntryHigh and EntryLow in single tick,
+    both entries must be detected and both actions returned.
+    
+    Scenario:
+    - EntryHigh = 100
+    - EntryLow = 90
+    - Price: 110 → 80 (single tick)
+    
+    Expected:
+    - ENTRY_1 action generated
+    - ENTRY_2 action generated
+    - Both processed in same cycle
+    - entry1_touched = True
+    - entry2_touched = True
+    - TP1 recalculated
+    """
+    source = await create_test_source(14)
+    
+    try:
+        signal, tracking_id = await create_signal_with_tracking(
+            source_id=source.id,
+            symbol="GAPUSDT",
+            direction=Direction.LONG,
+            entries=[Decimal("100"), Decimal("90")],
+            targets=[Decimal("110"), Decimal("120"), Decimal("130")],
+            stop_loss=Decimal("80"),  # Below the gap price
+            started_at=current_time,
+        )
+        
+        # Start with price between the two entries (not triggering startup)
+        # Price at 105 is above EntryHigh (100) but above EntryLow (90)
+        feed_price(price_cache, "GAPUSDT", Decimal("105"), current_time)
+        await run_tracking_tick(price_cache, tracker)
+        
+        async with UnitOfWork() as uow:
+            tracking = await uow.trackings.get_full(tracking_id)
+            assert tracking.has_entered is False, "Should not have entered yet"
+        
+        # Price gaps down crossing both entries in single tick
+        feed_price(price_cache, "GAPUSDT", Decimal("88"), current_time + timedelta(seconds=5))
+        await run_tracking_tick(price_cache, tracker)
+        
+        # Verify both entries touched
+        async with UnitOfWork() as uow:
+            tracking = await uow.trackings.get_full(tracking_id)
+            assert tracking.entry1_touched is True, "Entry1 should be touched"
+            assert tracking.entry2_touched is True, "Entry2 should be touched (gap scenario)"
+            assert tracking.has_entered is True
+            assert tracking.entry_method == EntryMethod.ENTRY_1
+            assert tracking.actual_entry_price == Decimal("100")
+            
+            # TP1 should be recalculated
+            # EntryHigh = 100, original TP1 = 110
+            # new_tp1 = 100 + (110 - 100) / 2 = 100 + 5 = 105
+            expected_new_tp1 = Decimal("105")
+            assert tracking.current_tp1_price == expected_new_tp1
+            
+            # Check audit logs - should have both Entry1 and Entry2 events
+            logs = await uow.audit_logs.by_tracking(tracking_id)
+            entry1_logs = [log for log in logs if log.event == AuditEventType.ENTRY1_HIT]
+            entry2_logs = [log for log in logs if log.event == AuditEventType.ENTRY2_HIT]
+            assert len(entry1_logs) == 1, "Should have exactly one Entry1 event"
+            assert len(entry2_logs) == 1, "Should have exactly one Entry2 event"
+            
+            tp1_recalc_logs = [log for log in logs if log.event == AuditEventType.TP1_RECALCULATED]
+            assert len(tp1_recalc_logs) == 1, "Should have TP1 recalculation event"
+        
+        # Verify TP1 works with recalculated price
+        feed_price(price_cache, "GAPUSDT", Decimal("105"), current_time + timedelta(seconds=10))
+        await run_tracking_tick(price_cache, tracker)
+        
+        async with UnitOfWork() as uow:
+            tracking = await uow.trackings.get_full(tracking_id)
+            # Debug: Check what's happening
+            print(f"highest_target_hit: {tracking.highest_target_hit}")
+            print(f"current_tp1_price: {tracking.current_tp1_price}")
+            print(f"status: {tracking.status}")
+            
+            assert tracking.highest_target_hit == 1
+            
+            tp_hits = await uow.tp_hits.by_tracking(tracking_id)
+            assert len(tp_hits) == 1
+            assert tp_hits[0].price == Decimal("105")
+    
+    finally:
+        await cleanup_test_data(signal.id, source.id)
+
+
+# ===========================================================================
+# Test 15: Gap Behavior SHORT
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_gap_behavior_short(async_engine, price_cache, tracker, current_time):
+    """
+    Test gap behavior for SHORT signal.
+    
+    Business Rule: If price crosses both EntryHigh and EntryLow in single tick,
+    both entries must be detected and both actions returned.
+    
+    For SHORT signals:
+    - EntryHigh = 100 (higher for SHORT - this is first entry)
+    - EntryLow = 110 (lower for SHORT - this is second/averaging entry)
+    
+    Scenario:
+    - Price: 95 → 115 (single tick, crosses both)
+    
+    Expected:
+    - ENTRY_1 action generated (at EntryHigh = 100)
+    - ENTRY_2 action generated (at EntryLow = 110)
+    - Both processed in same cycle
+    - entry1_touched = True
+    - entry2_touched = True
+    - TP1 recalculated
+    """
+    source = await create_test_source(15)
+    
+    try:
+        signal, tracking_id = await create_signal_with_tracking(
+            source_id=source.id,
+            symbol="GAPSHORT",
+            direction=Direction.SHORT,
+            entries=[Decimal("100"), Decimal("110")],  # EntryHigh=100, EntryLow=110 for SHORT
+            targets=[Decimal("90"), Decimal("80"), Decimal("70")],
+            stop_loss=Decimal("115"),
+            started_at=current_time,
+        )
+        
+        # Start below both entries
+        feed_price(price_cache, "GAPSHORT", Decimal("95"), current_time)
+        await run_tracking_tick(price_cache, tracker)
+        
+        async with UnitOfWork() as uow:
+            tracking = await uow.trackings.get_full(tracking_id)
+            assert tracking.has_entered is False, "Should not have entered yet"
+        
+        # Price gaps up crossing both entries in single tick
+        feed_price(price_cache, "GAPSHORT", Decimal("112"), current_time + timedelta(seconds=5))
+        await run_tracking_tick(price_cache, tracker)
+        
+        # Verify both entries touched
+        async with UnitOfWork() as uow:
+            tracking = await uow.trackings.get_full(tracking_id)
+            assert tracking.entry1_touched is True, "Entry1 should be touched"
+            assert tracking.entry2_touched is True, "Entry2 should be touched (gap scenario)"
+            assert tracking.has_entered is True
+            assert tracking.entry_method == EntryMethod.ENTRY_1
+            assert tracking.actual_entry_price == Decimal("100")  # EntryHigh for SHORT
+            
+            # TP1 should be recalculated
+            # For SHORT: EntryHigh = 100, original TP1 = 90
+            # new_tp1 = 100 + (90 - 100) / 2 = 100 - 5 = 95
+            expected_new_tp1 = Decimal("95")
+            assert tracking.current_tp1_price == expected_new_tp1
+            
+            # Check audit logs
+            logs = await uow.audit_logs.by_tracking(tracking_id)
+            entry1_logs = [log for log in logs if log.event == AuditEventType.ENTRY1_HIT]
+            entry2_logs = [log for log in logs if log.event == AuditEventType.ENTRY2_HIT]
+            assert len(entry1_logs) == 1
+            assert len(entry2_logs) == 1
+            
+            tp1_recalc_logs = [log for log in logs if log.event == AuditEventType.TP1_RECALCULATED]
+            assert len(tp1_recalc_logs) == 1
+        
+        # Verify TP1 works with recalculated price
+        feed_price(price_cache, "GAPSHORT", Decimal("95"), current_time + timedelta(seconds=10))
+        await run_tracking_tick(price_cache, tracker)
+        
+        async with UnitOfWork() as uow:
+            tracking = await uow.trackings.get_full(tracking_id)
+            assert tracking.highest_target_hit == 1
+            
+            tp_hits = await uow.tp_hits.by_tracking(tracking_id)
+            assert len(tp_hits) == 1
+            assert tp_hits[0].price == Decimal("95")
+    
+    finally:
+        await cleanup_test_data(signal.id, source.id)
+
+
+# ===========================================================================
+# Test 16: Startup Detection LONG
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_startup_detection_long(async_engine, price_cache, tracker, current_time):
+    """
+    Test startup detection for LONG signal.
+    
+    Business Rule: If tracking starts while price is already past EntryHigh,
+    immediately trigger Entry1.
+    
+    Scenario:
+    - EntryHigh = 100
+    - Starting price = 95 (already below EntryHigh)
+    
+    Expected:
+    - Entry1 immediately triggered on first tick
+    """
+    source = await create_test_source(16)
+    
+    try:
+        signal, tracking_id = await create_signal_with_tracking(
+            source_id=source.id,
+            symbol="STARTUPLONG",
+            direction=Direction.LONG,
+            entries=[Decimal("100"), Decimal("90")],
+            targets=[Decimal("110"), Decimal("120")],
+            stop_loss=Decimal("85"),
+            started_at=current_time,
+        )
+        
+        # First tick with price already below EntryHigh
+        feed_price(price_cache, "STARTUPLONG", Decimal("95"), current_time + timedelta(seconds=1))
+        await run_tracking_tick(price_cache, tracker)
+        
+        # Verify entry triggered immediately
+        async with UnitOfWork() as uow:
+            tracking = await uow.trackings.get_full(tracking_id)
+            assert tracking.entry1_touched is True, "Entry1 should be triggered at startup"
+            assert tracking.has_entered is True
+            assert tracking.entry_method == EntryMethod.ENTRY_1
+            assert tracking.actual_entry_price == Decimal("100")
+            assert tracking.status == TrackingStatus.TRACKING
+            
+            # Check audit log
+            logs = await uow.audit_logs.by_tracking(tracking_id)
+            entry1_logs = [log for log in logs if log.event == AuditEventType.ENTRY1_HIT]
+            assert len(entry1_logs) == 1
+    
+    finally:
+        await cleanup_test_data(signal.id, source.id)
+
+
+# ===========================================================================
+# Test 17: Startup Detection SHORT
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_startup_detection_short(async_engine, price_cache, tracker, current_time):
+    """
+    Test startup detection for SHORT signal.
+    
+    Business Rule: If tracking starts while price is already past EntryHigh,
+    immediately trigger Entry1.
+    
+    Scenario:
+    - EntryHigh = 90 (lower for SHORT)
+    - Starting price = 95 (already above EntryHigh)
+    
+    Expected:
+    - Entry1 immediately triggered on first tick
+    """
+    source = await create_test_source(17)
+    
+    try:
+        signal, tracking_id = await create_signal_with_tracking(
+            source_id=source.id,
+            symbol="STARTUPSHORT",
+            direction=Direction.SHORT,
+            entries=[Decimal("90"), Decimal("100")],
+            targets=[Decimal("80"), Decimal("70")],
+            stop_loss=Decimal("105"),
+            started_at=current_time,
+        )
+        
+        # First tick with price already above EntryHigh (90)
+        feed_price(price_cache, "STARTUPSHORT", Decimal("95"), current_time + timedelta(seconds=1))
+        await run_tracking_tick(price_cache, tracker)
+        
+        # Verify entry triggered immediately
+        async with UnitOfWork() as uow:
+            tracking = await uow.trackings.get_full(tracking_id)
+            assert tracking.entry1_touched is True, "Entry1 should be triggered at startup"
+            assert tracking.has_entered is True
+            assert tracking.entry_method == EntryMethod.ENTRY_1
+            assert tracking.actual_entry_price == Decimal("90")
+            assert tracking.status == TrackingStatus.TRACKING
+            
+            # Check audit log
+            logs = await uow.audit_logs.by_tracking(tracking_id)
+            entry1_logs = [log for log in logs if log.event == AuditEventType.ENTRY1_HIT]
+            assert len(entry1_logs) == 1
+    
+    finally:
+        await cleanup_test_data(signal.id, source.id)
+
+
+# ===========================================================================
+# Test 18: Entry2 Blocked After TP1
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_entry2_blocked_after_tp1(async_engine, price_cache, tracker, current_time):
+    """
+    Test that Entry2 is permanently blocked after any TP hit.
+    
+    Business Rule: "Once any TP has been reached, EntryLow becomes permanently disabled."
+    
+    Scenario:
+    - Entry1 → TP1 → Price drops to EntryLow → Entry2 should NOT trigger
+    """
+    source = await create_test_source(18)
+    
+    try:
+        signal, tracking_id = await create_signal_with_tracking(
+            source_id=source.id,
+            symbol="BLOCKENTRY2",
+            direction=Direction.LONG,
+            entries=[Decimal("100"), Decimal("90")],
+            targets=[Decimal("110"), Decimal("120")],
+            stop_loss=Decimal("85"),
+            started_at=current_time,
+        )
+        
+        # Entry1
+        feed_price(price_cache, "BLOCKENTRY2", Decimal("100"), current_time)
+        await run_tracking_tick(price_cache, tracker)
+        
+        async with UnitOfWork() as uow:
+            tracking = await uow.trackings.get_full(tracking_id)
+            assert tracking.entry1_touched is True
+            assert tracking.entry2_touched is False
+        
+        # TP1
+        feed_price(price_cache, "BLOCKENTRY2", Decimal("110"), current_time + timedelta(seconds=10))
+        await run_tracking_tick(price_cache, tracker)
+        
+        async with UnitOfWork() as uow:
+            tracking = await uow.trackings.get_full(tracking_id)
+            assert tracking.highest_target_hit == 1
+        
+        # Price drops to EntryLow - should be IGNORED
+        feed_price(price_cache, "BLOCKENTRY2", Decimal("90"), current_time + timedelta(seconds=20))
+        await run_tracking_tick(price_cache, tracker)
+        
+        async with UnitOfWork() as uow:
+            tracking = await uow.trackings.get_full(tracking_id)
+            assert tracking.entry2_touched is False, "Entry2 should be blocked after TP1 hit"
+            
+            # Check audit logs - should NOT have Entry2 event
+            logs = await uow.audit_logs.by_tracking(tracking_id)
+            entry2_logs = [log for log in logs if log.event == AuditEventType.ENTRY2_HIT]
+            assert len(entry2_logs) == 0, "Should have no Entry2 events after TP hit"
+    
+    finally:
+        await cleanup_test_data(signal.id, source.id)

@@ -186,13 +186,14 @@ class TestPositionEnteredEntry2:
     @pytest.mark.asyncio
     async def test_entry2_recalculates_tp1_for_short(self, processor, mock_tracking, mock_uow):
         """Test that ENTRY_2 recalculates TP1 for SHORT position."""
-        # SHORT: EntryHigh is still the higher price
-        # entries[0] = 48000.00 (EntryLow - lower price, first to be hit when coming from below)
-        # entries[1] = 49000.00 (EntryHigh - higher price, DCA)
-        # TP1 calculation: EntryHigh + (original_tp1 - EntryHigh) / 2
-        entry_high = Decimal("49000.00")  # Higher price
+        # SHORT signal entries structure:
+        # - entries[0] = 48000.00 (FirstEntry - lower price, first to be hit when market goes up)
+        # - entries[1] = 49000.00 (SecondEntry - higher price, DCA)
+        # TP1 calculation: FirstEntry + (original_tp1 - FirstEntry) / 2
+        # For SHORT, FirstEntry is the lower price
+        first_entry = Decimal("48000.00")  # Lower price (first to be hit for SHORT)
         original_tp1 = Decimal("44000.00")
-        expected_new_tp1 = entry_high + (original_tp1 - entry_high) / Decimal("2")  # 46500.00
+        expected_new_tp1 = first_entry + (original_tp1 - first_entry) / Decimal("2")  # 46000.00
 
         # Reconfigure signal for SHORT
         mock_tracking.signal.direction = Direction.SHORT

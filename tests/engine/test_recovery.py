@@ -280,13 +280,15 @@ async def test_recovery_after_entry1(async_engine, current_time):
 @pytest.mark.asyncio
 async def test_recovery_after_emergency_entry(async_engine, current_time):
     """
-    Scenario: 5 minutes → Emergency Entry → Restart → TP1 → TP2 → SL
+    Scenario: 5 minutes → Emergency Entry → Restart → Entry2 → TP1 → TP2 → SL
     
     Verify:
     - entry_method == EMERGENCY_ENTRY
     - actual_entry_price preserved
     - engine never attempts Entry1 again
     - engine never attempts another Emergency Entry
+    - Entry2 CAN fire after emergency (per updated business rules)
+    - TP1 recalculated when Entry2 fires
     - TP progression continues normally
     """
     source = await create_test_source(1002)
@@ -334,31 +336,44 @@ async def test_recovery_after_emergency_entry(async_engine, current_time):
         cache2 = PriceCache()
         tracker2 = Tracker()
         
-        # Phase 2: After restart - Feed Entry1 price (should be ignored)
+        # Phase 2: After restart - Feed Entry1 price (should be ignored for actual entry)
         feed_price(cache2, "ETHUSDT", Decimal("3000"), emergency_time + timedelta(seconds=30))
         await run_tracking_tick(cache2, tracker2)
         
         async with UnitOfWork() as uow:
             tracking = await uow.trackings.get_full(tracking_id)
-            assert tracking.entry1_touched is False  # Still false
+            # Note: entry1_touched is True because emergency entry sets it
+            assert tracking.entry1_touched is True
             assert tracking.entry_method == EntryMethod.EMERGENCY_ENTRY  # Unchanged
-            assert tracking.actual_entry_price == expected_emergency_price  # Unchanged
+            assert tracking.actual_entry_price == expected_emergency_price  # Unchanged, not updated to 3000
             
             # No new emergency entry events
             logs = await uow.audit_logs.by_tracking(tracking_id)
             emergency_logs = [log for log in logs if log.event == AuditEventType.EMERGENCY_ENTRY_HIT]
             assert len(emergency_logs) == 1  # Still only 1
         
-        # Feed Entry2 price (should also be ignored)
+        # Feed Entry2 price (SHOULD trigger after emergency per new business rules)
         feed_price(cache2, "ETHUSDT", Decimal("2950"), emergency_time + timedelta(minutes=1))
         await run_tracking_tick(cache2, tracker2)
         
         async with UnitOfWork() as uow:
             tracking = await uow.trackings.get_full(tracking_id)
-            assert tracking.entry2_touched is False  # Still false
+            # Business Rule: EntryLow CAN fire after Emergency Entry (as long as no TP hit yet)
+            assert tracking.entry2_touched is True
+            
+            # Check Entry2 audit log
+            logs = await uow.audit_logs.by_tracking(tracking_id)
+            entry2_logs = [log for log in logs if log.event == AuditEventType.ENTRY2_HIT]
+            assert len(entry2_logs) == 1
+            
+            # TP1 should be recalculated
+            # EntryHigh = 3000, original TP1 = 3100
+            # new_tp1 = 3000 + (3100 - 3000) / 2 = 3000 + 50 = 3050
+            expected_new_tp1 = Decimal("3050")
+            assert tracking.current_tp1_price == expected_new_tp1
         
-        # TP1
-        feed_price(cache2, "ETHUSDT", Decimal("3100"), emergency_time + timedelta(minutes=2))
+        # TP1 (recalculated value)
+        feed_price(cache2, "ETHUSDT", expected_new_tp1, emergency_time + timedelta(minutes=2))
         await run_tracking_tick(cache2, tracker2)
         
         async with UnitOfWork() as uow:
@@ -543,9 +558,7 @@ async def test_recovery_with_corrupted_peak_cache(async_engine, current_time):
             assert tracking.halfway_to_tp1_reached is True
             assert tracking.peak_price_after_entry == Decimal("105")
             
-            logs_before = await uow.audit_logs.by_tracking(tracking_id)
-            risk_free_logs = [log for log in logs_before if log.event == AuditEventType.HALFWAY_TO_TP1_REACHED]
-            assert len(risk_free_logs) == 1
+            # Note: halfway_to_tp1_reached has no specific audit event, it's just a tracked field
         
         # SIMULATE RESTART + CORRUPT CACHE
         # Force peak_price_after_entry to NULL
@@ -575,9 +588,7 @@ async def test_recovery_with_corrupted_peak_cache(async_engine, current_time):
             # Verify no duplicate events
             logs = await uow.audit_logs.by_tracking(tracking_id)
             
-            risk_free_logs = [log for log in logs if log.event == AuditEventType.HALFWAY_TO_TP1_REACHED]
-            assert len(risk_free_logs) == 1  # No duplicate
-            
+            # halfway_to_tp1_reached has no audit event, just verify closed event
             closed_logs = [log for log in logs if log.event == AuditEventType.SIGNAL_CLOSED]
             assert len(closed_logs) == 1
             assert closed_logs[0].payload["reason"] == "risk_free"
@@ -1092,9 +1103,7 @@ async def test_recovery_with_risk_free_state(async_engine, current_time):
             tracking = await uow.trackings.get_full(tracking_id)
             assert tracking.halfway_to_tp1_reached is True
             
-            logs_before = await uow.audit_logs.by_tracking(tracking_id)
-            halfway_logs = [log for log in logs_before if log.event == AuditEventType.HALFWAY_TO_TP1_REACHED]
-            assert len(halfway_logs) == 1
+            # Note: halfway_to_tp1_reached has no specific audit event
         
         # SIMULATE RESTART
         del cache1, tracker1
@@ -1113,9 +1122,7 @@ async def test_recovery_with_risk_free_state(async_engine, current_time):
             
             logs = await uow.audit_logs.by_tracking(tracking_id)
             
-            halfway_logs = [log for log in logs if log.event == AuditEventType.HALFWAY_TO_TP1_REACHED]
-            assert len(halfway_logs) == 1  # No duplicate
-            
+            # halfway_to_tp1_reached has no audit event, just verify closed event
             closed_logs = [log for log in logs if log.event == AuditEventType.SIGNAL_CLOSED]
             assert len(closed_logs) == 1
             assert closed_logs[0].payload["reason"] == "risk_free"

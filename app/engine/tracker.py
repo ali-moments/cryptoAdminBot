@@ -53,10 +53,16 @@ class Tracker:
         entry_actions = await self._entry.apply(
             tracking, tick, first_entry, second_entry
         )
+        
+        # Track if this is the first entry (before processing actions)
+        was_first_entry = not tracking.has_entered
+        
         if entry_actions:
             actions.extend(entry_actions)
-            # Just entered first position - don't check SL/TP on same tick
-            if not tracking.has_entered:
+            # If just entered for the first time, don't check SL/TP on same tick
+            # This prevents SL/TP check on the entry tick itself
+            # But DO allow gap scenario (multiple entry actions) to be processed
+            if was_first_entry:
                 return actions
         
         # 3. Stop loss check (only if entered)
