@@ -47,6 +47,7 @@ class Settings(BaseSettings):
 
     binance_ws: str = Field(alias="BINANCE_WS")
     bybit_ws: str = Field(alias="BYBIT_WS")
+    okx_ws: str = Field(alias="OKX_WS")
 
     # =========================
     # Application
