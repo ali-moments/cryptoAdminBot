@@ -64,7 +64,15 @@ class TrackingManager:
         self,
     ) -> None:
         while True:
-            await self._tick()
+            try:
+                await self._tick()
+            except asyncio.CancelledError:
+                # Preserve shutdown behavior
+                raise
+            except Exception:
+                # Log error and continue to next tick
+                # This prevents single failures from stopping the engine
+                logger.exception("Tick failed, continuing to next tick")
 
             await asyncio.sleep(
                 self._interval,
