@@ -1,8 +1,8 @@
-"""initial_schema
+"""initial schema
 
-Revision ID: 96f1dcc6713e
+Revision ID: 97df5f7ce412
 Revises: 
-Create Date: 2026-07-31 04:57:18.802625
+Create Date: 2026-08-04 14:01:40.139092
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '96f1dcc6713e'
+revision: str = '97df5f7ce412'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -93,8 +93,8 @@ def upgrade() -> None:
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('closed_at', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('entry1_touched', sa.Boolean(), nullable=False),
-    sa.Column('entry2_touched', sa.Boolean(), nullable=False),
+    sa.Column('entry1_touched', sa.Boolean(), nullable=False, comment='True when initial entry state reached: EntryHigh touched, startup past EntryHigh, or Emergency Entry. Does NOT necessarily mean EntryHigh price was physically touched - check entry_method to determine how entry occurred.'),
+    sa.Column('entry2_touched', sa.Boolean(), nullable=False, comment='True only when EntryLow (averaging entry) was physically touched before any TP. Emergency Entry and startup never set this flag.'),
     sa.Column('actual_entry_price', sa.Numeric(precision=20, scale=8), nullable=True),
     sa.Column('entry_method', sa.Enum('ENTRY_1', 'EMERGENCY_ENTRY', name='entry_method_enum'), nullable=True),
     sa.Column('emergency_entry_triggered_at', sa.DateTime(timezone=True), nullable=True),
