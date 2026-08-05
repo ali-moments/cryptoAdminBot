@@ -115,6 +115,7 @@ class SignalRepository(BaseRepository[Signal]):
             .options(
                 selectinload(Signal.entries),
                 selectinload(Signal.targets),
+                selectinload(Signal.tracking),
             )
         )
 

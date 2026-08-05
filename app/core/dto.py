@@ -39,8 +39,8 @@ class ValidatedSignal:
 
     leverage: int
 
-    entries: list[Decimal]
+    entries: list[ParsedEntry]
 
-    targets: list[Decimal]
+    targets: list[ParsedTarget]
 
     stop_loss: Decimal

@@ -2,6 +2,7 @@ import asyncio
 from collections import defaultdict
 
 from app.database.uow import UnitOfWork
+from app.database.enums import TrackingStatus
 from app.engine.tracker import Tracker
 from app.market.cache import PriceCache
 from app.engine.action_processor import ActionProcessor
@@ -172,7 +173,6 @@ class TrackingManager:
         Runs once per tracking per engine session.
         After restart, runs again for all active trackings.
         """
-        from app.database.enums import TrackingStatus
         
         # Only initialize trackings waiting for entry
         if tracking.status != TrackingStatus.WAITING_ENTRY:
