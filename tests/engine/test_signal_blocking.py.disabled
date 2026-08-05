@@ -1,0 +1,561 @@
+"""
+Signal blocking logic tests.
+
+Tests verify that:
+- New signals are blocked when an active signal exists for the same symbol without TP hits
+- New signals are allowed when the active signal has hit at least one TP
+- Different symbols do not block each other
+- Direction (LONG/SHORT) does not affect blocking logic
+- Blocked signals have status CANCELLED and NO tracking record
+- Allowed signals have status WAITING_ENTRY and a tracking record
+"""
+import pytest
+import asyncio
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from sqlalchemy import text
+
+from app.core.dto import ValidatedSignal, ParsedEntry, ParsedTarget
+from app.database.enums import Direction, SignalStatus, TrackingStatus, Provider
+from app.database.models import SignalSource
+from app.database.uow import UnitOfWork
+from app.services.signal_lifecycle import SignalLifecycleService
+
+
+# ===========================================================================
+# Test Helpers
+# ===========================================================================
+
+def create_validated_signal(
+    symbol: str,
+    direction: Direction,
+    entries: list[Decimal],
+    targets: list[Decimal],
+    stop_loss: Decimal,
+) -> ValidatedSignal:
+    """Create a ValidatedSignal DTO for testing."""
+    return ValidatedSignal(
+        symbol=symbol,
+        direction=direction,
+        entries=[ParsedEntry(position=i, price=p) for i, p in enumerate(entries, start=1)],
+        targets=[ParsedTarget(position=i, price=p) for i, p in enumerate(targets, start=1)],
+        stop_loss=stop_loss,
+        leverage=10,  # This will be recalculated by the service
+    )
+
+
+# ===========================================================================
+# Tests
+# ===========================================================================
+
+class TestSignalBlocking:
+    """Test signal blocking when active signals exist without TP hits."""
+    
+    @pytest.mark.asyncio
+    async def test_no_blocking_when_no_active_signals(self):
+        """New signal is allowed when no active signals exist for the symbol."""
+        test_symbol = "TEST_BTC_01"
+        
+        # Single UnitOfWork for entire test
+        async with UnitOfWork() as uow:
+            # Setup: Create source
+            source = await uow.signal_sources.create(
+                name=f"Test Source {test_symbol}",
+                parser_name="test_parser",
+                telegram_channel_id=12345001,
+                is_active=True,
+            )
+            await uow.flush()
+            
+            # Test the blocking logic - should be False when no signals exist
+            service = SignalLifecycleService()
+            should_block = await service._has_active_signal_without_tp_hit(test_symbol, uow)
+            assert should_block is False, "Should not block when no active signals exist"
+            
+            # Create signal through service
+            validated_signal = create_validated_signal(
+                symbol=test_symbol,
+                direction=Direction.LONG,
+                entries=[Decimal("50000"), Decimal("49000")],
+                targets=[Decimal("51000"), Decimal("52000"), Decimal("53000")],
+                stop_loss=Decimal("48000"),
+            )
+            
+            created_signal = await service.create_signal(validated_signal, source, uow)
+            await uow.flush()
+            
+            # Verify signal was created and not blocked
+            signal = await uow.signals.get_full(created_signal.id)
+            
+            assert signal is not None, "Signal should be created"
+            assert signal.symbol == test_symbol
+            assert signal.status == SignalStatus.WAITING_ENTRY, "Signal should be WAITING_ENTRY (not blocked)"
+            assert signal.tracking is not None, "Tracking should be created for non-blocked signal"
+            assert signal.tracking.is_active is True, "Tracking should be active"
+            assert signal.tracking.highest_target_hit == 0, "No TP hits yet"
+            
+            # Cleanup at the end using same UnitOfWork
+            await uow.session.execute(text(f"DELETE FROM trackings WHERE signal_id = {created_signal.id}"))
+            await uow.session.execute(text(f"DELETE FROM signal_entries WHERE signal_id = {created_signal.id}"))
+            await uow.session.execute(text(f"DELETE FROM signal_targets WHERE signal_id = {created_signal.id}"))
+            await uow.session.execute(text(f"DELETE FROM audit_logs WHERE signal_id = {created_signal.id}"))
+            await uow.session.execute(text(f"DELETE FROM signals WHERE id = {created_signal.id}"))
+            await uow.session.execute(text(f"DELETE FROM signal_sources WHERE id = {source.id}"))
+            
+            await uow.commit()
+    
+    @pytest.mark.asyncio
+    async def test_blocking_when_active_signal_without_tp_hit(self):
+        """New signal is blocked when active signal exists without TP hits."""
+        test_symbol = "TEST_ETH_02"
+        
+        # Single UnitOfWork for entire test
+        async with UnitOfWork() as uow:
+            # Setup: Create source
+            source = await uow.signal_sources.create(
+                name=f"Test Source {test_symbol}",
+                parser_name="test_parser",
+                telegram_channel_id=12345002,
+                is_active=True,
+            )
+            await uow.flush()
+            
+            # Setup: Create first signal with tracking (no TP hit)
+            signal1 = await uow.signals.create(
+                source_id=source.id,
+                symbol=test_symbol,
+                direction=Direction.LONG,
+                leverage=10,
+                stop_loss=Decimal("2800"),
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=72),
+                status=SignalStatus.WAITING_ENTRY,
+            )
+            await uow.flush()
+            
+            # Add entries and targets
+            await uow.signal_entries.create(signal_id=signal1.id, position=1, price=Decimal("3000"))
+            await uow.signal_entries.create(signal_id=signal1.id, position=2, price=Decimal("2900"))
+            await uow.signal_targets.create(signal_id=signal1.id, position=1, price=Decimal("3100"))
+            await uow.signal_targets.create(signal_id=signal1.id, position=2, price=Decimal("3200"))
+            
+            # Create tracking with no TP hits
+            tracking1 = await uow.trackings.create(
+                signal_id=signal1.id,
+                status=TrackingStatus.WAITING_ENTRY,
+                provider=Provider.BINANCE,
+                is_active=True,
+                started_at=datetime.now(timezone.utc),
+                current_stop_loss=Decimal("2800"),
+                current_tp1_price=Decimal("3100"),
+                highest_target_hit=0,  # No TP hit
+            )
+            await uow.flush()
+            
+            # Test: Check blocking logic
+            service = SignalLifecycleService()
+            should_block = await service._has_active_signal_without_tp_hit(test_symbol, uow)
+            assert should_block is True, "Should block when active signal exists without TP hits"
+            
+            # Test: Try to create second signal for same symbol (should be blocked)
+            validated_signal = create_validated_signal(
+                symbol=test_symbol,
+                direction=Direction.LONG,
+                entries=[Decimal("3050"), Decimal("2950")],
+                targets=[Decimal("3150"), Decimal("3250")],
+                stop_loss=Decimal("2850"),
+            )
+            
+            created_signal = await service.create_signal(validated_signal, source, uow)
+            await uow.flush()
+            
+            # Verify: Signal should be CANCELLED with NO tracking
+            blocked_signal = await uow.signals.get_full(created_signal.id)
+            
+            assert blocked_signal is not None, "Signal record should exist"
+            assert blocked_signal.status == SignalStatus.CANCELLED, "Signal should be CANCELLED due to blocking"
+            assert blocked_signal.tracking is None, "NO tracking should be created for blocked signal"
+            
+            # Cleanup at the end using same UnitOfWork
+            await uow.session.execute(text(f"DELETE FROM trackings WHERE id = {tracking1.id}"))
+            await uow.session.execute(text(f"DELETE FROM signal_entries WHERE signal_id IN ({signal1.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM signal_targets WHERE signal_id IN ({signal1.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM audit_logs WHERE signal_id IN ({signal1.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM signals WHERE id IN ({signal1.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM signal_sources WHERE id = {source.id}"))
+            
+            await uow.commit()
+    
+    @pytest.mark.asyncio
+    async def test_no_blocking_when_active_signal_has_tp_hit(self):
+        """New signal is allowed when active signal has hit at least one TP."""
+        test_symbol = "TEST_SOL_03"
+        
+        # Single UnitOfWork for entire test
+        async with UnitOfWork() as uow:
+            # Setup: Create source
+            source = await uow.signal_sources.create(
+                name=f"Test Source {test_symbol}",
+                parser_name="test_parser",
+                telegram_channel_id=12345003,
+                is_active=True,
+            )
+            await uow.flush()
+            
+            # Setup: Create first signal with tracking (TP1 hit)
+            signal1 = await uow.signals.create(
+                source_id=source.id,
+                symbol=test_symbol,
+                direction=Direction.LONG,
+                leverage=10,
+                stop_loss=Decimal("95"),
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=72),
+                status=SignalStatus.WAITING_ENTRY,
+            )
+            await uow.flush()
+            
+            # Add entries and targets
+            await uow.signal_entries.create(signal_id=signal1.id, position=1, price=Decimal("100"))
+            await uow.signal_entries.create(signal_id=signal1.id, position=2, price=Decimal("99"))
+            await uow.signal_targets.create(signal_id=signal1.id, position=1, price=Decimal("105"))
+            await uow.signal_targets.create(signal_id=signal1.id, position=2, price=Decimal("110"))
+            
+            # Create tracking with TP1 hit
+            tracking1 = await uow.trackings.create(
+                signal_id=signal1.id,
+                status=TrackingStatus.WAITING_ENTRY,
+                provider=Provider.BINANCE,
+                is_active=True,
+                started_at=datetime.now(timezone.utc),
+                current_stop_loss=Decimal("95"),
+                current_tp1_price=Decimal("105"),
+                highest_target_hit=1,  # TP1 hit
+            )
+            await uow.flush()
+            
+            # Test: Check blocking logic
+            service = SignalLifecycleService()
+            should_block = await service._has_active_signal_without_tp_hit(test_symbol, uow)
+            assert should_block is False, "Should NOT block when TP has been hit"
+            
+            # Test: Try to create second signal for same symbol (should NOT be blocked)
+            validated_signal = create_validated_signal(
+                symbol=test_symbol,
+                direction=Direction.LONG,
+                entries=[Decimal("102"), Decimal("101")],
+                targets=[Decimal("107"), Decimal("112")],
+                stop_loss=Decimal("97"),
+            )
+            
+            created_signal = await service.create_signal(validated_signal, source, uow)
+            await uow.flush()
+            
+            # Verify: Signal should be WAITING_ENTRY with tracking
+            new_signal = await uow.signals.get_full(created_signal.id)
+            
+            assert new_signal is not None, "Signal should be created"
+            assert new_signal.symbol == test_symbol
+            assert new_signal.status == SignalStatus.WAITING_ENTRY, "Signal should NOT be blocked"
+            assert new_signal.tracking is not None, "Tracking should be created"
+            assert new_signal.tracking.is_active is True
+            
+            # Cleanup at the end using same UnitOfWork
+            await uow.session.execute(text(f"DELETE FROM trackings WHERE id IN ({tracking1.id}, {new_signal.tracking.id})"))
+            await uow.session.execute(text(f"DELETE FROM signal_entries WHERE signal_id IN ({signal1.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM signal_targets WHERE signal_id IN ({signal1.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM audit_logs WHERE signal_id IN ({signal1.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM signals WHERE id IN ({signal1.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM signal_sources WHERE id = {source.id}"))
+            
+            await uow.commit()
+    
+    @pytest.mark.asyncio
+    async def test_different_symbols_do_not_block(self):
+        """Signals for different symbols do not block each other."""
+        test_btc_symbol = "TEST_BTC_04A"
+        test_eth_symbol = "TEST_ETH_04B"
+        
+        # Single UnitOfWork for entire test
+        async with UnitOfWork() as uow:
+            # Setup: Create source
+            source = await uow.signal_sources.create(
+                name=f"Test Source 04",
+                parser_name="test_parser",
+                telegram_channel_id=12345004,
+                is_active=True,
+            )
+            await uow.flush()
+            
+            # Setup: Create BTC signal with tracking (no TP hit)
+            btc_signal = await uow.signals.create(
+                source_id=source.id,
+                symbol=test_btc_symbol,
+                direction=Direction.LONG,
+                leverage=10,
+                stop_loss=Decimal("49000"),
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=72),
+                status=SignalStatus.WAITING_ENTRY,
+            )
+            await uow.flush()
+            
+            # Add BTC entries and targets
+            await uow.signal_entries.create(signal_id=btc_signal.id, position=1, price=Decimal("50000"))
+            await uow.signal_targets.create(signal_id=btc_signal.id, position=1, price=Decimal("51000"))
+            
+            # Create BTC tracking
+            btc_tracking = await uow.trackings.create(
+                signal_id=btc_signal.id,
+                status=TrackingStatus.WAITING_ENTRY,
+                provider=Provider.BINANCE,
+                is_active=True,
+                started_at=datetime.now(timezone.utc),
+                current_stop_loss=Decimal("49000"),
+                current_tp1_price=Decimal("51000"),
+                highest_target_hit=0,
+            )
+            await uow.flush()
+            
+            # Test: Check blocking logic for ETH (different symbol)
+            service = SignalLifecycleService()
+            should_block = await service._has_active_signal_without_tp_hit(test_eth_symbol, uow)
+            assert should_block is False, "Different symbols should not block each other"
+            
+            # Test: Try to create ETH signal (different symbol - should NOT be blocked)
+            validated_signal = create_validated_signal(
+                symbol=test_eth_symbol,
+                direction=Direction.LONG,
+                entries=[Decimal("3000")],
+                targets=[Decimal("3100")],
+                stop_loss=Decimal("2900"),
+            )
+            
+            created_signal = await service.create_signal(validated_signal, source, uow)
+            await uow.flush()
+            
+            # Verify: Signal should be WAITING_ENTRY with tracking
+            eth_signal = await uow.signals.get_full(created_signal.id)
+            
+            assert eth_signal is not None, "Signal should be created"
+            assert eth_signal.symbol == test_eth_symbol
+            assert eth_signal.status == SignalStatus.WAITING_ENTRY, "Different symbol should NOT be blocked"
+            assert eth_signal.tracking is not None, "Tracking should be created"
+            
+            # Cleanup at the end using same UnitOfWork
+            await uow.session.execute(text(f"DELETE FROM trackings WHERE id IN ({btc_tracking.id}, {eth_signal.tracking.id})"))
+            await uow.session.execute(text(f"DELETE FROM signal_entries WHERE signal_id IN ({btc_signal.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM signal_targets WHERE signal_id IN ({btc_signal.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM audit_logs WHERE signal_id IN ({btc_signal.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM signals WHERE id IN ({btc_signal.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM signal_sources WHERE id = {source.id}"))
+            
+            await uow.commit()
+    
+    @pytest.mark.asyncio
+    async def test_blocking_works_for_both_directions(self):
+        """Blocking works regardless of signal direction (LONG/SHORT)."""
+        test_symbol = "TEST_BNB_05"
+        await cleanup_test_data("TEST_")
+        
+        # Setup: Create SHORT signal with tracking (no TP hit)
+        source = await create_test_source(5)
+        
+        await create_signal_with_tracking(
+            source_id=source.id,
+            symbol=test_symbol,
+            direction=Direction.SHORT,
+            entries=[Decimal("300")],
+            targets=[Decimal("290")],
+            stop_loss=Decimal("310"),
+            highest_target_hit=0,
+        )
+        
+        # Act: Try to create another SHORT signal for same symbol
+        validated_signal = create_validated_signal(
+            symbol=test_symbol,
+            direction=Direction.SHORT,
+            entries=[Decimal("305")],
+            targets=[Decimal("295")],
+            stop_loss=Decimal("315"),
+        )
+        
+        service = SignalLifecycleService()
+        
+        async with UnitOfWork() as uow:
+            # Check blocking logic
+            should_block = await service._has_active_signal_without_tp_hit(test_symbol, uow)
+            assert should_block is True, "Should block SHORT signals too"
+            
+            # Create signal (should be blocked)
+            created_signal = await service.create_signal(validated_signal, source, uow)
+            await uow.commit()
+            
+            signal_id = created_signal.id
+        
+        # Verify: Signal should be CANCELLED with NO tracking
+        async with UnitOfWork() as uow:
+            signal = await uow.signals.get_full(signal_id)
+            
+            assert signal is not None, "Signal should be created (but marked as CANCELLED)"
+            assert signal.status == SignalStatus.CANCELLED, "Signal should be CANCELLED due to blocking"
+            assert signal.tracking is None, "NO tracking should be created for blocked signal"
+    
+    @pytest.mark.asyncio
+    async def test_long_and_short_block_each_other(self):
+        """LONG and SHORT signals for the same symbol block each other."""
+        test_symbol = "TEST_ADA_06"
+        
+        # Single UnitOfWork for entire test
+        async with UnitOfWork() as uow:
+            # Setup: Create source
+            source = await uow.signal_sources.create(
+                name=f"Test Source {test_symbol}",
+                parser_name="test_parser",
+                telegram_channel_id=12345006,
+                is_active=True,
+            )
+            await uow.flush()
+            
+            # Setup: Create LONG signal with tracking (no TP hit)
+            long_signal = await uow.signals.create(
+                source_id=source.id,
+                symbol=test_symbol,
+                direction=Direction.LONG,
+                leverage=10,
+                stop_loss=Decimal("0.45"),
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=72),
+                status=SignalStatus.WAITING_ENTRY,
+            )
+            await uow.flush()
+            
+            # Add LONG entries and targets
+            await uow.signal_entries.create(signal_id=long_signal.id, position=1, price=Decimal("0.50"))
+            await uow.signal_targets.create(signal_id=long_signal.id, position=1, price=Decimal("0.55"))
+            
+            # Create LONG tracking
+            long_tracking = await uow.trackings.create(
+                signal_id=long_signal.id,
+                status=TrackingStatus.WAITING_ENTRY,
+                provider=Provider.BINANCE,
+                is_active=True,
+                started_at=datetime.now(timezone.utc),
+                current_stop_loss=Decimal("0.45"),
+                current_tp1_price=Decimal("0.55"),
+                highest_target_hit=0,
+            )
+            await uow.flush()
+            
+            # Test: Check blocking logic
+            service = SignalLifecycleService()
+            should_block = await service._has_active_signal_without_tp_hit(test_symbol, uow)
+            assert should_block is True, "LONG should block SHORT for same symbol"
+            
+            # Test: Try to create SHORT signal for same symbol (should be blocked)
+            validated_signal = create_validated_signal(
+                symbol=test_symbol,
+                direction=Direction.SHORT,
+                entries=[Decimal("0.52")],
+                targets=[Decimal("0.47")],
+                stop_loss=Decimal("0.57"),
+            )
+            
+            created_signal = await service.create_signal(validated_signal, source, uow)
+            await uow.flush()
+            
+            # Verify: Signal should be CANCELLED with NO tracking
+            short_signal = await uow.signals.get_full(created_signal.id)
+            
+            assert short_signal is not None, "Signal should be created (but marked as CANCELLED)"
+            assert short_signal.status == SignalStatus.CANCELLED, "Signal should be CANCELLED due to blocking"
+            assert short_signal.tracking is None, "NO tracking should be created for blocked signal"
+            
+            # Cleanup at the end using same UnitOfWork
+            await uow.session.execute(text(f"DELETE FROM trackings WHERE id = {long_tracking.id}"))
+            await uow.session.execute(text(f"DELETE FROM signal_entries WHERE signal_id IN ({long_signal.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM signal_targets WHERE signal_id IN ({long_signal.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM audit_logs WHERE signal_id IN ({long_signal.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM signals WHERE id IN ({long_signal.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM signal_sources WHERE id = {source.id}"))
+            
+            await uow.commit()
+    
+    @pytest.mark.asyncio
+    async def test_multiple_tp_hits_allows_new_signal(self):
+        """New signal is allowed when active signal has hit multiple TPs."""
+        test_symbol = "TEST_DOGE_07"
+        
+        # Single UnitOfWork for entire test
+        async with UnitOfWork() as uow:
+            # Setup: Create source
+            source = await uow.signal_sources.create(
+                name=f"Test Source {test_symbol}",
+                parser_name="test_parser",
+                telegram_channel_id=12345007,
+                is_active=True,
+            )
+            await uow.flush()
+            
+            # Setup: Create signal with tracking (TP2 hit)
+            signal1 = await uow.signals.create(
+                source_id=source.id,
+                symbol=test_symbol,
+                direction=Direction.LONG,
+                leverage=10,
+                stop_loss=Decimal("0.09"),
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=72),
+                status=SignalStatus.WAITING_ENTRY,
+            )
+            await uow.flush()
+            
+            # Add entries and targets
+            await uow.signal_entries.create(signal_id=signal1.id, position=1, price=Decimal("0.10"))
+            await uow.signal_targets.create(signal_id=signal1.id, position=1, price=Decimal("0.11"))
+            await uow.signal_targets.create(signal_id=signal1.id, position=2, price=Decimal("0.12"))
+            await uow.signal_targets.create(signal_id=signal1.id, position=3, price=Decimal("0.13"))
+            
+            # Create tracking with TP2 hit
+            tracking1 = await uow.trackings.create(
+                signal_id=signal1.id,
+                status=TrackingStatus.WAITING_ENTRY,
+                provider=Provider.BINANCE,
+                is_active=True,
+                started_at=datetime.now(timezone.utc),
+                current_stop_loss=Decimal("0.09"),
+                current_tp1_price=Decimal("0.11"),
+                highest_target_hit=2,  # TP2 hit
+            )
+            await uow.flush()
+            
+            # Test: Check blocking logic
+            service = SignalLifecycleService()
+            should_block = await service._has_active_signal_without_tp_hit(test_symbol, uow)
+            assert should_block is False, "Should NOT block when multiple TPs hit"
+            
+            # Test: Try to create second signal for same symbol (should NOT be blocked)
+            validated_signal = create_validated_signal(
+                symbol=test_symbol,
+                direction=Direction.LONG,
+                entries=[Decimal("0.105")],
+                targets=[Decimal("0.115"), Decimal("0.125")],
+                stop_loss=Decimal("0.095"),
+            )
+            
+            created_signal = await service.create_signal(validated_signal, source, uow)
+            await uow.flush()
+            
+            # Verify: Signal should be WAITING_ENTRY with tracking
+            new_signal = await uow.signals.get_full(created_signal.id)
+            
+            assert new_signal is not None, "Signal should be created"
+            assert new_signal.symbol == test_symbol
+            assert new_signal.status == SignalStatus.WAITING_ENTRY, "Signal should NOT be blocked"
+            assert new_signal.tracking is not None, "Tracking should be created"
+            assert new_signal.tracking.is_active is True
+            
+            # Cleanup at the end using same UnitOfWork
+            await uow.session.execute(text(f"DELETE FROM trackings WHERE id IN ({tracking1.id}, {new_signal.tracking.id})"))
+            await uow.session.execute(text(f"DELETE FROM signal_entries WHERE signal_id IN ({signal1.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM signal_targets WHERE signal_id IN ({signal1.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM audit_logs WHERE signal_id IN ({signal1.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM signals WHERE id IN ({signal1.id}, {created_signal.id})"))
+            await uow.session.execute(text(f"DELETE FROM signal_sources WHERE id = {source.id}"))
+            
+            await uow.commit()
