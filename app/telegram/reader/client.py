@@ -12,6 +12,10 @@ class TelegramReader:
             session=os.path.join(settings.sessions_dir, settings.reader_session),
             api_id=settings.reader_api_id,
             api_hash=settings.reader_api_hash,
+            connection_retries=None,
+            auto_reconnect=True,
+            retry_delay=2,
+            use_ipv6=False,
         )
         register_handlers(self)
 
