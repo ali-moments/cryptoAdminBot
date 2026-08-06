@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     okx_ws: str = Field(alias="OKX_WS")
 
     # =========================
+    # SVG
+    # =========================
+    
+    profit_template_path: str = Field(alias="PROFIT_TEMPLATE_PATH")
+    entry_template_path: str = Field(alias="ENTRY_TEMPLATE_PATH")
+    svg_output_dir: str = Field(alias="SVG_OUTPUT_DIR", default="generated")
+
+    # =========================
     # Application
     # =========================
 
