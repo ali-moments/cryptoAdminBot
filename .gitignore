@@ -28,3 +28,6 @@ pyrightconfig.json
 docs/*
 docs.zip
 todo.txt
+
+# profit and entry shots firectory
+generated/*
