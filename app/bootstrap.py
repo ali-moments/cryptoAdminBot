@@ -19,6 +19,11 @@ from app.services.message_processor import MessageProcessor
 from app.telegram.parsers.manager import ParserManager
 from app.telegram.reader.client import TelegramReader
 from app.telegram.reader.manager import ReaderManager
+from app.services.telegram import TelegramService
+from app.telegram.sender.client import TelegramSender
+from app.telegram.sender.formatter import TelegramFormatter
+from app.services.settings import States
+from app.services.svg import SvgService
 
 
 @dataclass(slots=True)
@@ -37,11 +42,12 @@ class Application:
 
     reader: TelegramReader
 
+    sender: TelegramService
+
 
 
 
 def build_application() -> Application:
-    registry = OurbitRegistry()
 
     parser_manager = ParserManager()
 
@@ -58,9 +64,8 @@ def build_application() -> Application:
     parser_manager.register("crypto_traders_vip", CryptoTradersVIPParser())
 
 
-    validation = ValidationService(
-        registry,
-    )
+    registry = OurbitRegistry()
+    validation = ValidationService(registry)
 
     lifecycle = SignalLifecycleService()
 
@@ -70,15 +75,20 @@ def build_application() -> Application:
         validation_service=validation,
         signal_lifecycle=lifecycle,
     )
-
     reader_manager = ReaderManager()
+    reader_manager.subscribe(processor.handle)
 
-    reader_manager.subscribe(
-        processor.handle,
-    )
+    reader = TelegramReader(reader_manager)
 
-    reader = TelegramReader(
-        reader_manager,
+    svg_service = SvgService()
+    sender = TelegramSender()
+    states = States()
+    tg_formatter = TelegramFormatter()
+    telegram_service = TelegramService(
+        sender=sender,
+        formatter=tg_formatter,
+        svg=svg_service,
+        states=states,
     )
 
     return Application(
@@ -89,4 +99,6 @@ def build_application() -> Application:
         processor=processor,
         reader_manager=reader_manager,
         reader=reader,
+        sender=telegram_service
+        
     )

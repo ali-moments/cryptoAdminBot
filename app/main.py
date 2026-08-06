@@ -23,9 +23,13 @@ async def main() -> None:
         app.registry.count,
     )
 
-    logger.info("Starting Telegram reader...")
+    logger.info("Starting Telegram reader module...")
 
     await app.reader.start()
+
+    logger.info("starting Telegram sender module...")
+
+    await app.sender._sender.start()
 
 
 if __name__ == "__main__":
