@@ -24,6 +24,18 @@ from app.telegram.sender.client import TelegramSender
 from app.telegram.sender.formatter import TelegramFormatter
 from app.services.settings import States
 from app.services.svg import SvgService
+from app.market.cache import PriceCache
+from app.market.dispatcher import EventDispatcher
+from app.market.manager import ProviderManager
+from app.market.providers.binance import BinanceProvider
+from app.market.providers.bybit import BybitProvider
+from app.market.providers.okx import OKXProvider
+from app.market.events import PriceUpdatedEvent
+from app.database.enums import Provider
+from app.engine.tracking_manager import TrackingManager
+from app.engine.tracker import Tracker
+from app.engine.action_processor import ActionProcessor
+from app.market.subscription_manager import SubscriptionManager
 
 
 @dataclass(slots=True)
@@ -44,6 +56,14 @@ class Application:
 
     sender: TelegramService
 
+    market_manager: ProviderManager
+
+    price_cache: PriceCache
+
+    tracking_manager: TrackingManager
+
+    subscription_manager: SubscriptionManager
+
 
 
 
@@ -63,11 +83,51 @@ def build_application() -> Application:
     parser_manager.register("mahee_vip", MaheeVIPParser())
     parser_manager.register("crypto_traders_vip", CryptoTradersVIPParser())
 
-
     registry = OurbitRegistry()
     validation = ValidationService(registry)
 
     lifecycle = SignalLifecycleService()
+
+    # Market components
+    dispatcher = EventDispatcher()
+    price_cache = PriceCache()
+    
+    # Subscribe price cache to price update events
+    dispatcher.subscribe(PriceUpdatedEvent, price_cache.on_price_updated)
+
+    # Create market providers
+    providers = {
+        Provider.BINANCE: BinanceProvider(dispatcher),
+        Provider.BYBIT: BybitProvider(dispatcher),
+        Provider.OKX: OKXProvider(dispatcher),
+    }
+
+    market_manager = ProviderManager(
+        dispatcher=dispatcher,
+        cache=price_cache,
+        providers=providers,
+        primary=Provider.BINANCE,
+        fallback=Provider.BYBIT,
+        disaster=Provider.OKX,
+    )
+
+    # Engine components
+    tracker = Tracker()
+    action_processor = ActionProcessor()
+    
+    tracking_manager = TrackingManager(
+        uow_factory=UnitOfWork,
+        tracker=tracker,
+        processor=action_processor,
+        cache=price_cache,
+        interval=2.0,  # 2-second polling as per architecture
+    )
+
+    subscription_manager = SubscriptionManager(
+        uow_factory=UnitOfWork,
+        provider_manager=market_manager,
+        interval=5.0,  # 5-second polling for subscription sync
+    )
 
     processor = MessageProcessor(
         uow_factory=UnitOfWork,
@@ -99,6 +159,9 @@ def build_application() -> Application:
         processor=processor,
         reader_manager=reader_manager,
         reader=reader,
-        sender=telegram_service
-        
+        sender=telegram_service,
+        market_manager=market_manager,
+        price_cache=price_cache,
+        tracking_manager=tracking_manager,
+        subscription_manager=subscription_manager,
     )
