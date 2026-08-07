@@ -73,9 +73,9 @@ def mock_tracking(mock_signal):
 
 
 @pytest.fixture
-def processor(mock_uow):
+def processor():
     """Create ActionProcessor instance."""
-    return ActionProcessor(mock_uow)
+    return ActionProcessor()
 
 
 class TestPositionEnteredEntry1:
@@ -90,7 +90,7 @@ class TestPositionEnteredEntry1:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         assert mock_tracking.entry1_touched is True
         assert mock_tracking.entry_method == EntryMethod.ENTRY_1
@@ -107,7 +107,7 @@ class TestPositionEnteredEntry1:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         mock_uow.audit_logs.create.assert_called_once()
         call_kwargs = mock_uow.audit_logs.create.call_args[1]
@@ -128,7 +128,7 @@ class TestPositionEnteredEntry1:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         # Should not update state again
         mock_uow.audit_logs.create.assert_not_called()
@@ -146,7 +146,7 @@ class TestPositionEnteredEntry2:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         assert mock_tracking.entry2_touched is True
 
@@ -167,7 +167,7 @@ class TestPositionEnteredEntry2:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         assert mock_tracking.current_tp1_price == expected_new_tp1
         
@@ -207,7 +207,7 @@ class TestPositionEnteredEntry2:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         assert mock_tracking.current_tp1_price == expected_new_tp1
 
@@ -222,7 +222,7 @@ class TestPositionEnteredEntry2:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         # Should not update state again
         mock_uow.audit_logs.create.assert_not_called()
@@ -240,7 +240,7 @@ class TestPositionEnteredEmergencyEntry:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         assert mock_tracking.entry_method == EntryMethod.EMERGENCY_ENTRY
         assert mock_tracking.actual_entry_price == Decimal("49000.00")
@@ -257,7 +257,7 @@ class TestPositionEnteredEmergencyEntry:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         mock_uow.audit_logs.create.assert_called_once()
         call_kwargs = mock_uow.audit_logs.create.call_args[1]
@@ -275,7 +275,7 @@ class TestPositionEnteredEmergencyEntry:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         # Should not update state again
         mock_uow.audit_logs.create.assert_not_called()
@@ -296,7 +296,7 @@ class TestTakeProfitHit:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         mock_uow.tp_hits.create.assert_called_once()
         call_kwargs = mock_uow.tp_hits.create.call_args[1]
@@ -318,7 +318,7 @@ class TestTakeProfitHit:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         assert mock_tracking.highest_target_hit == 2
 
@@ -338,7 +338,7 @@ class TestTakeProfitHit:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         # Should not create duplicate
         mock_uow.tp_hits.create.assert_not_called()
@@ -356,7 +356,7 @@ class TestTakeProfitHit:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         call_kwargs = mock_uow.tp_hits.create.call_args[1]
         profit = call_kwargs["profit_percent"]
@@ -376,7 +376,7 @@ class TestTakeProfitHit:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         call_kwargs = mock_uow.tp_hits.create.call_args[1]
         profit = call_kwargs["profit_percent"]
@@ -395,7 +395,7 @@ class TestTakeProfitHit:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         # Should create audit log
         mock_uow.audit_logs.create.assert_called_once()
@@ -415,7 +415,7 @@ class TestStopLossHit:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         assert mock_tracking.status == TrackingStatus.CLOSED
         assert mock_tracking.is_active is False
@@ -431,7 +431,7 @@ class TestStopLossHit:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         # Should not create audit log
         mock_uow.audit_logs.create.assert_not_called()
@@ -444,7 +444,7 @@ class TestStopLossHit:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         mock_uow.audit_logs.create.assert_called_once()
         call_kwargs = mock_uow.audit_logs.create.call_args[1]
@@ -464,7 +464,7 @@ class TestWaitingEntryExpired:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         assert mock_tracking.status == TrackingStatus.CANCELLED
         assert mock_tracking.is_active is False
@@ -478,7 +478,7 @@ class TestWaitingEntryExpired:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         assert mock_tracking.status == TrackingStatus.CANCELLED
         assert mock_tracking.is_active is False
@@ -491,7 +491,7 @@ class TestWaitingEntryExpired:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         mock_uow.audit_logs.create.assert_called_once()
         call_kwargs = mock_uow.audit_logs.create.call_args[1]
@@ -510,7 +510,7 @@ class TestRiskFreed:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         assert mock_tracking.status == TrackingStatus.RISK_FREE
         assert mock_tracking.is_active is False
@@ -524,7 +524,7 @@ class TestRiskFreed:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         mock_uow.audit_logs.create.assert_called_once()
         call_kwargs = mock_uow.audit_logs.create.call_args[1]
@@ -543,7 +543,7 @@ class TestTrackingCompleted:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         assert mock_tracking.status == TrackingStatus.CLOSED
         assert mock_tracking.is_active is False
@@ -556,7 +556,7 @@ class TestTrackingCompleted:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         mock_uow.audit_logs.create.assert_called_once()
         call_kwargs = mock_uow.audit_logs.create.call_args[1]
@@ -585,7 +585,7 @@ class TestIdempotency:
             ),
         ]
 
-        await processor.process(mock_tracking, actions)
+        await processor.process(mock_tracking, actions, mock_uow)
 
         # Both actions should be processed
         assert mock_uow.audit_logs.create.call_count == 2
@@ -607,7 +607,7 @@ class TestIdempotency:
             ),
         ]
 
-        await processor.process(mock_tracking, actions)
+        await processor.process(mock_tracking, actions, mock_uow)
 
         # Only first action should be processed
         assert mock_uow.audit_logs.create.call_count == 1
@@ -622,7 +622,7 @@ class TestIdempotency:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         # Should process successfully
         assert mock_uow.audit_logs.create.call_count >= 1
@@ -644,7 +644,7 @@ class TestProfitCalculation:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         call_kwargs = mock_uow.tp_hits.create.call_args[1]
         assert call_kwargs["profit_percent"] == Decimal("0")
@@ -662,7 +662,7 @@ class TestProfitCalculation:
             timestamp=datetime.now(UTC),
         )
 
-        await processor.process(mock_tracking, [action])
+        await processor.process(mock_tracking, [action], mock_uow)
 
         call_kwargs = mock_uow.tp_hits.create.call_args[1]
         profit = call_kwargs["profit_percent"]

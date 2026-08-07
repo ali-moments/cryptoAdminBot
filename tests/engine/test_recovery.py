@@ -128,9 +128,9 @@ def feed_price(cache: PriceCache, symbol: str, price: Decimal, timestamp: dateti
 async def run_tracking_tick(cache: PriceCache, tracker: Tracker):
     """Run a single tracking manager tick with fresh UoW."""
     uow = UnitOfWork()
-    processor = ActionProcessor(uow)
+    processor = ActionProcessor()
     manager = TrackingManager(
-        uow=uow,
+        uow_factory=lambda: uow,
         tracker=tracker,
         processor=processor,
         cache=cache,
