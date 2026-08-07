@@ -175,6 +175,55 @@ class ProviderManager:
 
         self._subscriptions[symbol] = count - 1
 
+    async def sync(self, required_symbols: set[str]) -> None:
+        """Synchronize current subscriptions with required symbol set.
+        
+        Args:
+            required_symbols: Complete set of symbols that should be subscribed
+            
+        Compares current subscriptions with required symbols and:
+        - Subscribes to missing symbols
+        - Unsubscribes from unused symbols
+        
+        Uses existing subscribe/unsubscribe methods to preserve reference counting.
+        """
+        if not self._running:
+            logger.warning("Cannot sync subscriptions: ProviderManager not running")
+            return
+            
+        # Get current subscriptions
+        current_symbols = set(self._subscriptions.keys())
+        
+        # Calculate differences
+        missing_symbols = required_symbols - current_symbols
+        unused_symbols = current_symbols - required_symbols
+        
+        # Log sync operation
+        if missing_symbols or unused_symbols:
+            logger.debug(
+                f"Syncing subscriptions: +{len(missing_symbols)} -{len(unused_symbols)} "
+                f"(current: {len(current_symbols)}, required: {len(required_symbols)})"
+            )
+            
+            if missing_symbols:
+                logger.debug(f"Subscribing to: {sorted(missing_symbols)}")
+            if unused_symbols:
+                logger.debug(f"Unsubscribing from: {sorted(unused_symbols)}")
+        
+        # Subscribe to missing symbols
+        for symbol in missing_symbols:
+            try:
+                await self.subscribe(symbol)
+            except Exception as e:
+                logger.error(f"Failed to subscribe to {symbol}: {e}")
+        
+        # Unsubscribe from unused symbols
+        for symbol in unused_symbols:
+            try:
+                await self.unsubscribe(symbol)
+            except Exception as e:
+                logger.error(f"Failed to unsubscribe from {symbol}: {e}")
+
     def get_price(
         self,
         symbol: str,

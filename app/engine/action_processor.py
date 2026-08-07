@@ -32,23 +32,25 @@ class ActionProcessor:
     ActionProcessor uses the current transaction context.
     """
 
-    def __init__(self, uow: UnitOfWork) -> None:
-        self._uow = uow
+    def __init__(self) -> None:
+        pass
 
     async def process(
         self,
         tracking: Tracking,
         actions: list,
+        uow: UnitOfWork,
     ) -> None:
         """Process actions with idempotency checks.
         
         Args:
             tracking: Tracking object attached to an active session
             actions: List of actions to process
+            uow: UnitOfWork instance to use for database operations
         """
         for action in actions:
             # Check if already processed
-            if await self._is_already_processed(tracking, action):
+            if await self._is_already_processed(tracking, action, uow):
                 logger.debug(
                     "Action already processed, skipping: tracking=%d action=%s",
                     tracking.id,
@@ -59,22 +61,23 @@ class ActionProcessor:
             # Route to handler
             match action:
                 case PositionEntered():
-                    await self._position_entered(tracking, action)
+                    await self._position_entered(tracking, action, uow)
                 case WaitingEntryExpired():
-                    await self._waiting_entry_expired(tracking, action)
+                    await self._waiting_entry_expired(tracking, action, uow)
                 case StopLossHit():
-                    await self._stop_loss_hit(tracking, action)
+                    await self._stop_loss_hit(tracking, action, uow)
                 case TakeProfitHit():
-                    await self._take_profit_hit(tracking, action)
+                    await self._take_profit_hit(tracking, action, uow)
                 case RiskFreed():
-                    await self._risk_freed(tracking, action)
+                    await self._risk_freed(tracking, action, uow)
                 case TrackingCompleted():
-                    await self._tracking_completed(tracking, action)
+                    await self._tracking_completed(tracking, action, uow)
 
     async def _is_already_processed(
         self,
         tracking: Tracking,
         action,
+        uow: UnitOfWork,
     ) -> bool:
         """Check if action was already processed using existing state."""
         match action:
@@ -91,7 +94,7 @@ class ActionProcessor:
             case TakeProfitHit():
                 # Query database for existing TpHit record
                 # Database uniqueness constraint is the source of truth
-                existing = await self._uow.tp_hits.by_tracking(tracking.id)
+                existing = await uow.tp_hits.by_tracking(tracking.id)
                 return any(
                     tp.position == action.target_number
                     for tp in existing
@@ -107,6 +110,7 @@ class ActionProcessor:
         self,
         tracking: Tracking,
         action: PositionEntered,
+        uow: UnitOfWork,
     ) -> None:
         """Handle position entry.
         
@@ -130,7 +134,7 @@ class ActionProcessor:
             tracking.peak_price_after_entry = action.price
             
             # Write audit log
-            await self._uow.audit_logs.create(
+            await uow.audit_logs.create(
                 tracking_id=tracking.id,
                 signal_id=tracking.signal_id,
                 event=AuditEventType.ENTRY1_HIT,
@@ -178,7 +182,7 @@ class ActionProcessor:
                 tracking.current_tp1_price = new_tp1
                 
                 # Write TP1 recalculation audit log
-                await self._uow.audit_logs.create(
+                await uow.audit_logs.create(
                     tracking_id=tracking.id,
                     signal_id=tracking.signal_id,
                     event=AuditEventType.TP1_RECALCULATED,
@@ -200,7 +204,7 @@ class ActionProcessor:
                 )
             
             # Write entry2 audit log
-            await self._uow.audit_logs.create(
+            await uow.audit_logs.create(
                 tracking_id=tracking.id,
                 signal_id=tracking.signal_id,
                 event=AuditEventType.ENTRY2_HIT,
@@ -242,7 +246,7 @@ class ActionProcessor:
             )
             
             # Write audit log
-            await self._uow.audit_logs.create(
+            await uow.audit_logs.create(
                 tracking_id=tracking.id,
                 signal_id=tracking.signal_id,
                 event=AuditEventType.EMERGENCY_ENTRY_HIT,
@@ -269,6 +273,7 @@ class ActionProcessor:
         self,
         tracking: Tracking,
         action: WaitingEntryExpired,
+        uow: UnitOfWork,
     ) -> None:
         """Handle waiting entry expiration.
         
@@ -282,7 +287,7 @@ class ActionProcessor:
         tracking.closed_at = action.timestamp
 
         # Write audit log
-        await self._uow.audit_logs.create(
+        await uow.audit_logs.create(
             tracking_id=tracking.id,
             signal_id=tracking.signal_id,
             event=AuditEventType.SIGNAL_EXPIRED,
@@ -307,6 +312,7 @@ class ActionProcessor:
         self,
         tracking: Tracking,
         action: StopLossHit,
+        uow: UnitOfWork,
     ) -> None:
         """Handle stop loss hit."""
         # Update tracking state
@@ -315,7 +321,7 @@ class ActionProcessor:
         tracking.closed_at = action.timestamp
 
         # Write audit log
-        await self._uow.audit_logs.create(
+        await uow.audit_logs.create(
             tracking_id=tracking.id,
             signal_id=tracking.signal_id,
             event=AuditEventType.SIGNAL_CLOSED,
@@ -341,6 +347,7 @@ class ActionProcessor:
         self,
         tracking: Tracking,
         action: TakeProfitHit,
+        uow: UnitOfWork,
     ) -> None:
         """Handle take profit hit."""
         # Calculate profit percentage
@@ -354,7 +361,7 @@ class ActionProcessor:
             profit_pct = Decimal("0")
 
         # Create TpHit record (unique constraint prevents duplicates)
-        await self._uow.tp_hits.create(
+        await uow.tp_hits.create(
             tracking_id=tracking.id,
             position=action.target_number,
             price=action.price,
@@ -367,7 +374,7 @@ class ActionProcessor:
             tracking.highest_target_hit = action.target_number
 
         # Write audit log
-        await self._uow.audit_logs.create(
+        await uow.audit_logs.create(
             tracking_id=tracking.id,
             signal_id=tracking.signal_id,
             event=AuditEventType.TARGET_HIT,
@@ -395,6 +402,7 @@ class ActionProcessor:
         self,
         tracking: Tracking,
         action: RiskFreed,
+        uow: UnitOfWork,
     ) -> None:
         """Handle risk free event."""
         # Update tracking state
@@ -403,7 +411,7 @@ class ActionProcessor:
         tracking.closed_at = action.timestamp
 
         # Write audit log
-        await self._uow.audit_logs.create(
+        await uow.audit_logs.create(
             tracking_id=tracking.id,
             signal_id=tracking.signal_id,
             event=AuditEventType.SIGNAL_CLOSED,
@@ -429,6 +437,7 @@ class ActionProcessor:
         self,
         tracking: Tracking,
         action: TrackingCompleted,
+        uow: UnitOfWork,
     ) -> None:
         """Handle tracking completion."""
         # Update tracking state
@@ -437,7 +446,7 @@ class ActionProcessor:
         tracking.closed_at = action.timestamp
 
         # Write audit log
-        await self._uow.audit_logs.create(
+        await uow.audit_logs.create(
             tracking_id=tracking.id,
             signal_id=tracking.signal_id,
             event=AuditEventType.SIGNAL_CLOSED,
