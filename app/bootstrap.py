@@ -30,7 +30,7 @@ from app.market.manager import ProviderManager
 from app.market.providers.binance import BinanceProvider
 from app.market.providers.bybit import BybitProvider
 from app.market.providers.okx import OKXProvider
-from app.market.events import PriceUpdatedEvent
+from app.market.events import PriceUpdatedEvent, ProviderChangedEvent
 from app.database.enums import Provider
 from app.engine.tracking_manager import TrackingManager
 from app.engine.tracker import Tracker
@@ -122,6 +122,9 @@ def build_application() -> Application:
         cache=price_cache,
         interval=2.0,  # 2-second polling as per architecture
     )
+
+    # Subscribe tracking manager to provider change events
+    dispatcher.subscribe(ProviderChangedEvent, tracking_manager.on_provider_changed)
 
     subscription_manager = SubscriptionManager(
         uow_factory=UnitOfWork,
