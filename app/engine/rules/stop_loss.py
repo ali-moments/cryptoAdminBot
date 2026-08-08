@@ -36,8 +36,8 @@ class StopLossRule:
             return []
 
         # Stop loss hit - check if it's risk-free
-        # Conditions: halfway to TP1 reached, TP1 never hit
-        if tracking.halfway_to_tp1_reached and tracking.highest_target_hit == 0:
+        # Conditions: halfway to TP1 reached, or any TP Hits
+        if tracking.halfway_to_tp1_reached or tracking.highest_target_hit > 0:
             return [
                 RiskFreed(
                     price=current_price,

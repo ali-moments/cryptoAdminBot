@@ -1,24 +1,87 @@
+from decimal import Decimal
 import app.telegram.sender.emojies as emojies
 from app.telegram.sender.templates import MessageTemplates
+from app.database.models import TpHit
 from app.telegram.common.dto import (
     SignalDTO,
+    PnlDTO
 )
 
 class TelegramFormatter:
     def __init__(self) -> None:
         self.templates = MessageTemplates()
+        self.TARGET_ORDINALS = {
+            1: "اول",
+            2: "دوم",
+            3: "سوم",
+            4: "چهارم",
+            5: "پنجم",
+            6: "ششم",
+            7: "هفتم",
+            8: "هشتم",
+            9: "نهم",
+        }
 
-    def format_tp_hit(self):
-        return "target hit"
+    def _get_target_ordinal(self, target_position: int) -> str:
+        return self.TARGET_ORDINALS.get(target_position, f'{target_position}ام')
 
-    def format_entry_hit(self):
-        return "entry hit"
+    def _calculate_duration(self, start, end) -> str:
+        """ gets time as input and returns duration string
 
-    def format_sl_hit(self):
-        return "stopped"
+        input:
+            start: time
+            end: time
+            duration: timedelta = end - start
+            return examples:
+                1D, 3H, 45M
+                2H, 30M
+                54M
+        """
+        duration = end - start
+        total_seconds = int(duration.total_seconds())
+
+        days = total_seconds // 86400
+        hours = (total_seconds % 86400) // 3600
+        minutes = (total_seconds % 3600) // 60
+
+        parts = []
+        if days > 0:
+            parts.append(f"{days}D")
+        if hours > 0:
+            parts.append(f"{hours}H")
+        if minutes > 0 or not parts:  # Show minutes if no other parts or if minutes > 0
+            parts.append(f"{minutes}M")
+
+        return ", ".join(parts)
+
+    def _get_pnl_emoji(status: str) -> str:
+        if status.startswith('TP'):
+            return emojies.PNL_ITEM_TARGET
+        if status == 'STOP':
+            return emojies.PNL_ITEM_LOSS
+        else:
+            return emojies.PNL_ITEM_OPEN
+
+    def format_tp_hit(self, tp_hit: TpHit):
+        text = '\n'.join(self.templates.TP_HIT.format(
+            ordinal = self._get_target_ordinal(tp_hit.position),
+            profit = f"{tp_hit.profit_percent:.2f}",
+            duration = self._calculate_duration(tp_hit.created_at, tp_hit.hit_at)
+        ))
+        return text
+
+    def format_first_entry_hit(self):
+        return "first entry hit"
+
+    def format_second_entry_hit(self):
+        return "second Entry Hit"
+
+    def format_sl_hit(self, loss: Decimal):
+        text = '\n'.join(self.templates.SL_HIT.format(loss=f"{loss:.2f}"))
+        return text
 
     def format_signal(self, signal: SignalDTO):
-        direction_arrow = emojies.LONG_ARROW2 if signal.direction == "LONG" else emojies.SHORT_ARROW2
+        direction_arrow = emojies.LONG_ARROW if signal.direction == "LONG" else emojies.SHORT_ARROW
 
         if len(signal.entries) == 1:
             entry_text = f"{signal.entries[0]}"
@@ -40,11 +103,26 @@ class TelegramFormatter:
         ))
         return test
 
-    def format_pnl(self):
-        return "pnl message"
+    def format_pnl(self, stats:PnlDTO):
+        header = self.templates.PNL_HEADER
+
+        pnl_items = []
+        for item in stats.items:
+            pnl_items.append(self.templates.PNL_ITEM.format(
+                symbol=item.symbol,
+                status=item.status,
+                pnl=item.pnl,
+                emoji=self._get_pnl_emoji(item.status)
+            ))
+
+        content = '\n'.join(pnl_items)
+        footer = self.templates.PNL_FOOTER.format(pnl=f'{stats.total}')
+        return header + content + footer
 
     def format_good_morning(self):
-        return "good morning"
+        text = '\n'.join(self.templates.GOOD_MORNING)
+        return text
 
     def format_good_night(self):
-        return "good night"
+        text = '\n'.join(self.templates.GOOD_NIGHT)
+        return text

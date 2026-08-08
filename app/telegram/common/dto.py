@@ -32,8 +32,20 @@ class SignalDTO:
     stop_loss: Decimal
     leverage: int
 
+
+@dataclass(slots=True)
+class PNLItem:
+    symbol: str
+    status: str
+    pnl: Decimal
+
+
+@dataclass(slots=True)
+class PnlDTO:
+    items: List[PNLItem]
+    total: Decimal
+
+
 # todo:
-# TpHitDTO
-# StopLossDTO
-# PNLDTO
+# these are for later
 # EntryHitDTO
