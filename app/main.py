@@ -36,6 +36,10 @@ async def main() -> None:
 
     await app.tracking_manager.start()
 
+    logger.info("Starting scheduler...")
+
+    await app.scheduler.start()
+
     logger.info("starting Telegram sender module...")
 
     # Start the sender as a background task since it also runs indefinitely  
@@ -108,6 +112,12 @@ async def main() -> None:
         await app.tracking_manager.stop()
     except Exception as e:
         logger.error(f"Error stopping tracking manager: {e}")
+
+    try:
+        logger.info("Stopping scheduler...")
+        await app.scheduler.stop()
+    except Exception as e:
+        logger.error(f"Error stopping scheduler: {e}")
 
     try:
         logger.info("Stopping subscription synchronization...")

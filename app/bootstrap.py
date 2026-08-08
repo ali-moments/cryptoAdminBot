@@ -36,6 +36,7 @@ from app.engine.tracking_manager import TrackingManager
 from app.engine.tracker import Tracker
 from app.engine.action_processor import ActionProcessor
 from app.market.subscription_manager import SubscriptionManager
+from app.scheduler import AppScheduler
 
 
 @dataclass(slots=True)
@@ -63,6 +64,8 @@ class Application:
     tracking_manager: TrackingManager
 
     subscription_manager: SubscriptionManager
+
+    scheduler: AppScheduler
 
 
 
@@ -157,6 +160,9 @@ def build_application() -> Application:
 
     reader = TelegramReader(reader_manager)
 
+    # Create scheduler with telegram service
+    scheduler = AppScheduler(telegram_service)
+
     return Application(
         registry=registry,
         parser_manager=parser_manager,
@@ -170,4 +176,5 @@ def build_application() -> Application:
         price_cache=price_cache,
         tracking_manager=tracking_manager,
         subscription_manager=subscription_manager,
+        scheduler=scheduler,
     )
