@@ -61,3 +61,17 @@ class RiskFreed:
 @dataclass(slots=True, frozen=True)
 class TrackingCompleted:
     timestamp: datetime
+
+
+@dataclass(slots=True, frozen=True)
+class SignalExpired:
+    """
+    Signal has exceeded its 72-hour lifetime and must be closed.
+    
+    This is different from WaitingEntryExpired which handles 2-hour
+    entry timeouts. SignalExpired applies to any active signal
+    that has exceeded its configured lifetime.
+    """
+    reason: str  # "72_hour_limit"
+    timestamp: datetime
+    expires_at: datetime

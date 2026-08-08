@@ -1,7 +1,7 @@
 from decimal import Decimal
 from loguru import logger
 
-from app.database.enums import TrackingStatus, AuditEventType, Direction, EntryMethod
+from app.database.enums import TrackingStatus, AuditEventType, Direction, EntryMethod, SignalStatus
 from app.database.models import Tracking
 from app.database.uow import UnitOfWork
 from app.engine.actions import (
@@ -11,6 +11,7 @@ from app.engine.actions import (
     TakeProfitHit,
     RiskFreed,
     TrackingCompleted,
+    SignalExpired,
     EntryType,
 )
 
@@ -71,6 +72,8 @@ class ActionProcessor:
                     await self._position_entered(tracking, action, uow)
                 case WaitingEntryExpired():
                     await self._waiting_entry_expired(tracking, action, uow)
+                case SignalExpired():
+                    await self._signal_expired(tracking, action, uow)
                 case StopLossHit():
                     await self._stop_loss_hit(tracking, action, uow)
                 case TakeProfitHit():
@@ -107,7 +110,7 @@ class ActionProcessor:
                     for tp in existing
                 )
 
-            case StopLossHit() | RiskFreed() | WaitingEntryExpired() | TrackingCompleted():
+            case StopLossHit() | RiskFreed() | WaitingEntryExpired() | SignalExpired() | TrackingCompleted():
                 # Check if already closed
                 return not tracking.is_active
 
@@ -283,6 +286,43 @@ class ActionProcessor:
         logger.info(f"✓ WAITING ENTRY EXPIRED: {tracking.signal.symbol} - {action.reason} (tracking_id={tracking.id})")
         # TODO: Send Telegram notification: SIGNAL_CANCELLED
         # TODO: Update statistics
+
+    async def _signal_expired(
+        self,
+        tracking: Tracking,
+        action: SignalExpired,
+        uow: UnitOfWork,
+    ) -> None:
+        """Handle signal expiration due to 72-hour limit.
+        
+        This is different from waiting entry expiration. Signal expiration
+        can occur on any active tracking regardless of status when the
+        72-hour lifetime is exceeded.
+        """
+        # Update tracking state
+        tracking.status = TrackingStatus.CLOSED
+        tracking.is_active = False
+        tracking.closed_at = action.timestamp
+
+        # Update signal status
+        tracking.signal.status = SignalStatus.EXPIRED
+
+        # Write audit log
+        await uow.audit_logs.create(
+            tracking_id=tracking.id,
+            signal_id=tracking.signal_id,
+            event=AuditEventType.SIGNAL_EXPIRED,
+            payload={
+                "reason": action.reason,
+                "timestamp": action.timestamp.isoformat(),
+                "expires_at": action.expires_at.isoformat(),
+            },
+        )
+
+        # Log event
+        logger.info(f"✓ SIGNAL EXPIRED: {tracking.signal.symbol} - {action.reason} at {action.expires_at} (tracking_id={tracking.id})")
+        # TODO: Send Telegram notification: SIGNAL_EXPIRED
+        # TODO: Update statistics (increment expired_signals counter)
 
     async def _stop_loss_hit(
         self,

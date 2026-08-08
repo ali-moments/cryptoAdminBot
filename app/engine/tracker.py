@@ -8,12 +8,14 @@ from app.engine.rules.entry import EntryRule
 from app.engine.rules.waiting_entry import WaitingEntryRule
 from app.engine.rules.stop_loss import StopLossRule
 from app.engine.rules.take_profit import TakeProfitRule
+from app.engine.rules.expiry import ExpiryRule
 from app.engine.actions import (
     WaitingEntryExpired,
     PositionEntered,
     StopLossHit,
     RiskFreed,
     TrackingCompleted,
+    SignalExpired,
 )
 
 
@@ -23,6 +25,7 @@ class Tracker:
         self._entry = EntryRule()
         self._stop_loss = StopLossRule()
         self._take_profit = TakeProfitRule()
+        self._expiry = ExpiryRule()
 
     async def track(
         self,
@@ -38,6 +41,15 @@ class Tracker:
         first_entry, second_entry = self._get_ordered_entries(tracking.signal)
         
         actions = []
+        
+        # 0. Signal expiry check (72-hour limit) - applies to all active signals
+        expiry_actions = await self._expiry.apply(
+            tracking, tick, first_entry, second_entry
+        )
+        if expiry_actions:
+            actions.extend(expiry_actions)
+            # Signal expired - no further rules apply
+            return actions
         
         # 1. Waiting entry timeout (only if not entered)
         if not tracking.has_entered:
