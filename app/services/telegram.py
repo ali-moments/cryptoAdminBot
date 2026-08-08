@@ -1,4 +1,3 @@
-from typing import Any
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -40,7 +39,7 @@ class TelegramService:
             channel_id=self.states.target_channel,
             message=text,
         )
-        
+
         # Store signal message in database
         if sent_message:
             async with self._uow_factory() as uow:
@@ -53,27 +52,27 @@ class TelegramService:
                     reply_to_message_id=None,
                 )
                 await uow.commit()
-        
+
         return sent_message
 
 
     async def send_sl_hit(self, tracking: Tracking, loss_percent: str) -> SentMessage | None:
         """Send stop loss hit notification"""
         text = self._formatter.format_sl_hit(loss=loss_percent)
-        
+
         # Get original signal message for reply-to
         reply_to_message_id = None
         async with self._uow_factory() as uow:
             signal_message = await uow.telegram_messages.signal_message(tracking.signal_id)
             if signal_message:
                 reply_to_message_id = signal_message.message_id
-        
+
         sent_message = await self._sender.send_message(
             channel_id=self.states.target_channel,
             message=text,
             reply_to=reply_to_message_id,
         )
-        
+
         # Store message in database
         if sent_message:
             async with self._uow_factory() as uow:
@@ -86,14 +85,14 @@ class TelegramService:
                     reply_to_message_id=reply_to_message_id,
                 )
                 await uow.commit()
-        
+
         return sent_message
 
 
     async def send_entry_hit(self, tracking: Tracking, entry_type: int, entry_price: str) -> SentMessage | None:
         """Send entry hit notification with image"""
         signal = tracking.signal
-        
+
         # Format text message
         if entry_type == 2:
             text = self._formatter.format_second_entry_hit()
@@ -109,7 +108,7 @@ class TelegramService:
             entry_type=entry_type,
             datetime_str=self._tehran_now_str()
         )
-        
+
         file_path = self._svg.generate_entry_shot(
             pair=entry_dto.symbol,
             direction=entry_dto.direction,
@@ -132,10 +131,10 @@ class TelegramService:
             file_path=file_path,
             reply_to=reply_to_message_id,
         )
-        
+
         # Clean up generated file
         self._svg.clear_shot_file(file_path)
-        
+
         # Store message in database
         if sent_file:
             message_type = MessageType.ENTRY1_HIT if entry_type == 1 else MessageType.ENTRY2_HIT
@@ -149,7 +148,7 @@ class TelegramService:
                     reply_to_message_id=reply_to_message_id,
                 )
                 await uow.commit()
-        
+
         return sent_file
 
 
@@ -158,10 +157,10 @@ class TelegramService:
         Sends TP hit image with caption.
         """
         signal = tracking.signal
-        
+
         # Calculate leveraged profit percentage for display
         leveraged_profit = tp_hit.profit_percent * signal.leverage
-        
+
         caption = self._formatter.format_tp_hit(tp_hit=tp_hit, leveraged_profit=leveraged_profit)
 
         # Generate profit shot image
@@ -174,7 +173,7 @@ class TelegramService:
             exit_price=str(tp_hit.price),
             datetime_str=self._tehran_now_str()
         )
-        
+
         file_path = self._svg.generate_profit_shot(
             pair=profit_dto.symbol,
             direction=profit_dto.direction,
@@ -199,10 +198,10 @@ class TelegramService:
             file_path=file_path,
             reply_to=reply_to_message_id,
         )
-        
+
         # Clean up generated file
         self._svg.clear_shot_file(file_path)
-        
+
         # Store message in database
         if sent_file:
             async with self._uow_factory() as uow:
@@ -215,27 +214,27 @@ class TelegramService:
                     reply_to_message_id=reply_to_message_id,
                 )
                 await uow.commit()
-        
+
         return sent_file
 
 
     async def send_signal_cancelled(self, tracking: Tracking, reason: str) -> SentMessage | None:
         """Send signal cancelled notification"""
         text = f"سیگنال {tracking.signal.symbol} لغو شد\nدلیل: {reason}"
-        
+
         # Get original signal message for reply-to
         reply_to_message_id = None
         async with self._uow_factory() as uow:
             signal_message = await uow.telegram_messages.signal_message(tracking.signal_id)
             if signal_message:
                 reply_to_message_id = signal_message.message_id
-        
+
         sent_message = await self._sender.send_message(
             channel_id=self.states.target_channel,
             message=text,
             reply_to=reply_to_message_id,
         )
-        
+
         # Store message in database
         if sent_message:
             async with self._uow_factory() as uow:
@@ -248,7 +247,7 @@ class TelegramService:
                     reply_to_message_id=reply_to_message_id,
                 )
                 await uow.commit()
-        
+
         return sent_message
 
     async def send_signal_closed(self, tracking: Tracking, reason: str) -> SentMessage | None:
@@ -258,22 +257,22 @@ class TelegramService:
             "all_targets_hit": "تمام اهداف",
             "expired": "منقضی شده"
         }.get(reason, reason)
-        
+
         text = f"سیگنال {tracking.signal.symbol} بسته شد\nدلیل: {reason_text}"
-        
+
         # Get original signal message for reply-to
         reply_to_message_id = None
         async with self._uow_factory() as uow:
             signal_message = await uow.telegram_messages.signal_message(tracking.signal_id)
             if signal_message:
                 reply_to_message_id = signal_message.message_id
-        
+
         sent_message = await self._sender.send_message(
             channel_id=self.states.target_channel,
             message=text,
             reply_to=reply_to_message_id,
         )
-        
+
         # Store message in database
         if sent_message:
             async with self._uow_factory() as uow:
@@ -286,7 +285,7 @@ class TelegramService:
                     reply_to_message_id=reply_to_message_id,
                 )
                 await uow.commit()
-        
+
         return sent_message
 
     async def send_pnl(self):
