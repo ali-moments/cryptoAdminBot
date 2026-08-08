@@ -42,7 +42,7 @@ class Settings(BaseSettings):
 
 
     # =========================
-    # Engine
+    # Market
     # =========================
 
     binance_ws: str = Field(alias="BINANCE_WS")
@@ -50,9 +50,16 @@ class Settings(BaseSettings):
     okx_ws: str = Field(alias="OKX_WS")
 
     # =========================
+    # Engine
+    # =========================
+
+    emergency_entry_timeout: int = Field(alias="EMERGENCY_ENTRY_TIMEOUT", default=5)
+    signal_entry_timeout: int = Field(alias="SIGNAL_ENTRY_TIMEOUT", default=2)
+
+    # =========================
     # SVG
     # =========================
-    
+
     profit_template_path: str = Field(alias="PROFIT_TEMPLATE_PATH")
     entry_template_path: str = Field(alias="ENTRY_TEMPLATE_PATH")
     svg_output_dir: str = Field(alias="SVG_OUTPUT_DIR", default="generated")

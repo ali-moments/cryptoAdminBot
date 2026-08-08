@@ -13,9 +13,13 @@ from app.database.models import (
     Tracking,
 )
 from app.database.uow import UnitOfWork
+from app.services.settings import States
 
 
 class SignalLifecycleService:
+    def __init__(self, states: States) -> None:
+        self.states = states
+
     @staticmethod
     def _normalize_leverage(n: int) -> int:
         """
@@ -109,41 +113,25 @@ class SignalLifecycleService:
         return None
 
 
-    async def _has_active_signal_without_tp_hit(
+    async def _should_cancel_signal(
         self,
-        symbol: str,
         uow: UnitOfWork,
     ) -> bool:
         """
-        Check if there is an active signal with the same symbol that has not hit any TP yet.
+        Check if we should cancel the new signal due to capacity limit.
 
-        Returns True if such a signal exists, False otherwise.
+        Returns True if there are already {number} or more active trackings without any TP hits.
         """
-        # Get all active signals for this symbol (any direction)
-        candidates = await uow.signals.find_active_candidates(
-            symbol=symbol,
-            direction=Direction.LONG,
-        )
+        count = await uow.trackings.count_active_without_tp_hits()
 
-        short_candidates = await uow.signals.find_active_candidates(
-            symbol=symbol,
-            direction=Direction.SHORT,
-        )
-
-        all_candidates = candidates + short_candidates
-
-        # Check if any of them has tracking with highest_target_hit == 0
-        for candidate in all_candidates:
-            if candidate.tracking is not None:
-                if candidate.tracking.highest_target_hit == 0:
-                    logger.trace(
-                        f"Active signal found for {symbol} (ID: {candidate.id}) "
-                        f"with no TP hits yet. New signal will be ignored."
-                    )
-                    return True
+        if count >= self.states.active_signals_limit:
+            logger.info(
+                f"Signal will be cancelled: {count} active trackings exist without TP hits (limit: {self.states.active_signals_limit})"
+            )
+            return True
 
         return False
-    
+
     def _determine_provider(self, symbol: str) -> Provider:
         """Determine which exchange provider to use for this symbol.
 
@@ -174,16 +162,13 @@ class SignalLifecycleService:
             logger.trace("Duplicate signal ignored.")
             return duplicate
 
-        # Check if there's an active signal for this symbol without any TP hits
-        has_active_without_tp = await self._has_active_signal_without_tp_hit(
-            symbol=signal.symbol,
-            uow=uow,
-        )
+        # Check if we should cancel this signal due to capacity limit
+        should_cancel = await self._should_cancel_signal(uow=uow)
 
-        if has_active_without_tp:
+        if should_cancel:
             logger.info(
-                f"Ignoring new signal for {signal.symbol}: "
-                f"Active signal exists without TP hits."
+                f"New signal for {signal.symbol} will be cancelled: "
+                f"{self.states.active_signals_limit} or more active trackings without TP hits already exist."
             )
 
 
@@ -207,14 +192,14 @@ class SignalLifecycleService:
             direction=signal.direction,
             leverage=calculated_leverage,
             stop_loss=signal.stop_loss,
-            expires_at=datetime.now(UTC) + timedelta(hours=72),
-            status=SignalStatus.CANCELLED if has_active_without_tp else SignalStatus.WAITING_ENTRY,
+            expires_at=datetime.now(UTC) + timedelta(hours=self.states.signal_expiry_timeout),
+            status=SignalStatus.CANCELLED if should_cancel else SignalStatus.WAITING_ENTRY,
         )
 
         await uow.signals.add(db_signal)
         await uow.flush()
 
-        logger.trace("Signal added to db.")
+        logger.info("Signal added to db.")
 
         for entry in signal.entries:
             await uow.signal_entries.add(
@@ -239,7 +224,7 @@ class SignalLifecycleService:
         await uow.audit_logs.add(
             AuditLog(
                 signal_id=db_signal.id,
-                event=AuditEventType.SIGNAL_REJECTED if has_active_without_tp  else AuditEventType.SIGNAL_RECEIVED,
+                event=AuditEventType.SIGNAL_REJECTED if should_cancel else AuditEventType.SIGNAL_RECEIVED,
                 payload={
                     "symbol": db_signal.symbol,
                     "direction": db_signal.direction,
@@ -252,9 +237,10 @@ class SignalLifecycleService:
                 }
             )
         )
-        logger.trace("Audit_log for the Signal saved to db.")
-        
-        if not has_active_without_tp:
+        logger.info("Audit_log for the Signal saved to db.")
+
+        # TODO: do not send the signal message in this scenario
+        if not should_cancel:
             await uow.session.refresh(db_signal, ['targets'])
             tracking = Tracking(
                 signal_id=db_signal.id,
@@ -267,7 +253,7 @@ class SignalLifecycleService:
             )
             db_tracking = await uow.trackings.add(tracking)
             await uow.flush()
-            
+
             await uow.audit_logs.add(
                 AuditLog(
                     signal_id=db_signal.id,
@@ -280,6 +266,6 @@ class SignalLifecycleService:
                 )
             )
 
-            logger.trace("Tracking created for signal.")
+            logger.info("Tracking created for signal.")
 
         return db_signal

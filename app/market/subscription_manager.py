@@ -87,11 +87,11 @@ class SubscriptionManager:
             # Extract unique symbols that should be subscribed
             required_symbols = {tracking.signal.symbol for tracking in trackings}
 
-            # Log what we found
-            if required_symbols:
-                logger.trace(f"SUBSCRIPTION SYNC: Found {len(trackings)} active trackings requiring {len(required_symbols)} unique symbols: {sorted(required_symbols)}")
-            else:
-                logger.trace("SUBSCRIPTION SYNC: No active trackings found, no subscriptions required")
+            # # Log what we found
+            # if required_symbols:
+            #     logger.trace(f"SUBSCRIPTION SYNC: Found {len(trackings)} active trackings requiring {len(required_symbols)} unique symbols: {sorted(required_symbols)}")
+            # else:
+            #     logger.trace("SUBSCRIPTION SYNC: No active trackings found, no subscriptions required")
 
             # Delegate to ProviderManager for subscription synchronization
             await self._provider_manager.sync(required_symbols)

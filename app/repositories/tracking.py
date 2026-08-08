@@ -60,3 +60,15 @@ class TrackingRepository(BaseRepository[Tracking]):
 
         result = await self.session.scalars(stmt)
         return list(result)
+
+    async def count_active_without_tp_hits(self) -> int:
+        """Count active trackings that haven't hit any TP yet."""
+        stmt = (
+            select(Tracking)
+            .where(
+                Tracking.is_active.is_(True),
+                Tracking.highest_target_hit == 0,
+            )
+        )
+        result = await self.session.scalars(stmt)
+        return len(list(result))

@@ -85,13 +85,14 @@ def build_application() -> Application:
 
     registry = OurbitRegistry()
     validation = ValidationService(registry)
+    states = States()
 
-    lifecycle = SignalLifecycleService()
+    lifecycle = SignalLifecycleService(states=states)
 
     # Market components
     dispatcher = EventDispatcher()
     price_cache = PriceCache()
-    
+
     # Subscribe price cache to price update events
     dispatcher.subscribe(PriceUpdatedEvent, price_cache.on_price_updated)
 
@@ -114,7 +115,7 @@ def build_application() -> Application:
     # Engine components
     tracker = Tracker()
     action_processor = ActionProcessor()
-    
+
     tracking_manager = TrackingManager(
         uow_factory=UnitOfWork,
         tracker=tracker,
@@ -145,7 +146,6 @@ def build_application() -> Application:
 
     svg_service = SvgService()
     sender = TelegramSender()
-    states = States()
     tg_formatter = TelegramFormatter()
     telegram_service = TelegramService(
         sender=sender,
