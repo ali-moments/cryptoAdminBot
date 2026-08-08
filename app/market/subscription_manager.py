@@ -89,9 +89,9 @@ class SubscriptionManager:
 
             # Log what we found
             if required_symbols:
-                logger.debug(f"SUBSCRIPTION SYNC: Found {len(trackings)} active trackings requiring {len(required_symbols)} unique symbols: {sorted(required_symbols)}")
+                logger.trace(f"SUBSCRIPTION SYNC: Found {len(trackings)} active trackings requiring {len(required_symbols)} unique symbols: {sorted(required_symbols)}")
             else:
-                logger.debug("SUBSCRIPTION SYNC: No active trackings found, no subscriptions required")
+                logger.trace("SUBSCRIPTION SYNC: No active trackings found, no subscriptions required")
 
             # Delegate to ProviderManager for subscription synchronization
             await self._provider_manager.sync(required_symbols)
