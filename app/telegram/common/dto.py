@@ -46,6 +46,22 @@ class PnlDTO:
     total: Decimal
 
 
-# todo:
-# these are for later
-# EntryHitDTO
+@dataclass(slots=True)
+class EntryHitDTO:
+    symbol: str
+    direction: str
+    leverage: int
+    entry_price: str
+    entry_type: int  # 1 or 2
+    datetime_str: str
+
+
+@dataclass(slots=True)
+class ProfitShotDTO:
+    symbol: str
+    direction: str
+    leverage: int
+    pnl: str
+    entry_price: str
+    exit_price: str
+    datetime_str: str

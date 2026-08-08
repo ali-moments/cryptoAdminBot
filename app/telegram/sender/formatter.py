@@ -62,10 +62,13 @@ class TelegramFormatter:
         else:
             return emojies.PNL_ITEM_OPEN
 
-    def format_tp_hit(self, tp_hit: TpHit):
+    def format_tp_hit(self, tp_hit: TpHit, leveraged_profit: Decimal | None = None):
+        # Use leveraged profit if provided, otherwise use the database profit_percent
+        profit_to_display = leveraged_profit if leveraged_profit is not None else tp_hit.profit_percent
+        
         text = '\n'.join(self.templates.TP_HIT.format(
             ordinal = self._get_target_ordinal(tp_hit.position),
-            profit = f"{tp_hit.profit_percent:.2f}",
+            profit = f"{profit_to_display:.2f}",
             duration = self._calculate_duration(tp_hit.created_at, tp_hit.hit_at)
         ))
         return text
@@ -76,8 +79,8 @@ class TelegramFormatter:
     def format_second_entry_hit(self):
         return "second Entry Hit"
 
-    def format_sl_hit(self, loss: Decimal):
-        text = '\n'.join(self.templates.SL_HIT.format(loss=f"{loss:.2f}"))
+    def format_sl_hit(self, loss: str):
+        text = '\n'.join(self.templates.SL_HIT.format(loss=loss))
         return text
 
     def format_signal(self, signal: SignalDTO):

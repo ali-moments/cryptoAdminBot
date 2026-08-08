@@ -114,7 +114,20 @@ def build_application() -> Application:
 
     # Engine components
     tracker = Tracker()
-    action_processor = ActionProcessor()
+    
+    # Create TelegramService first so ActionProcessor can use it
+    svg_service = SvgService()
+    tg_sender = TelegramSender()
+    tg_formatter = TelegramFormatter()
+    telegram_service = TelegramService(
+        sender=tg_sender,
+        formatter=tg_formatter,
+        svg=svg_service,
+        states=states,
+        uow_factory=UnitOfWork,
+    )
+    
+    action_processor = ActionProcessor(telegram_service)
 
     tracking_manager = TrackingManager(
         uow_factory=UnitOfWork,
@@ -143,16 +156,6 @@ def build_application() -> Application:
     reader_manager.subscribe(processor.handle)
 
     reader = TelegramReader(reader_manager)
-
-    svg_service = SvgService()
-    sender = TelegramSender()
-    tg_formatter = TelegramFormatter()
-    telegram_service = TelegramService(
-        sender=sender,
-        formatter=tg_formatter,
-        svg=svg_service,
-        states=states,
-    )
 
     return Application(
         registry=registry,

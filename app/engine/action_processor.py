@@ -1,7 +1,8 @@
 from decimal import Decimal
 from loguru import logger
+from typing import TYPE_CHECKING
 
-from app.database.enums import TrackingStatus, AuditEventType, Direction, EntryMethod, SignalStatus
+from app.database.enums import TrackingStatus, AuditEventType, Direction, EntryMethod, SignalStatus, MessageType
 from app.database.models import Tracking
 from app.database.uow import UnitOfWork
 from app.engine.actions import (
@@ -14,6 +15,9 @@ from app.engine.actions import (
     SignalExpired,
     EntryType,
 )
+
+if TYPE_CHECKING:
+    from app.services.telegram import TelegramService
 
 
 class ActionProcessor:
@@ -30,8 +34,8 @@ class ActionProcessor:
     ActionProcessor uses the current transaction context.
     """
 
-    def __init__(self) -> None:
-        pass
+    def __init__(self, telegram_service: "TelegramService") -> None:
+        self._telegram = telegram_service
 
     async def process(
         self,
@@ -156,6 +160,13 @@ class ActionProcessor:
             )
             
             logger.info(f"✓ ENTRY1 HIT: {signal.symbol} @ {action.price} (tracking_id={tracking.id})")
+            
+            # Send Telegram notification
+            await self._telegram.send_entry_hit(
+                tracking=tracking,
+                entry_type=1,
+                entry_price=str(action.price)
+            )
         
         elif action.entry_type == EntryType.ENTRY_2:
             # ============================================================
@@ -214,6 +225,13 @@ class ActionProcessor:
             )
             
             logger.info(f"✓ ENTRY2 HIT: {signal.symbol} @ {action.price} (tracking_id={tracking.id})")
+            
+            # Send Telegram notification
+            await self._telegram.send_entry_hit(
+                tracking=tracking,
+                entry_type=2,
+                entry_price=str(action.price)
+            )
         
         elif action.entry_type == EntryType.EMERGENCY_ENTRY:
             # ============================================================
@@ -251,8 +269,13 @@ class ActionProcessor:
             )
             
             logger.info(f"✓ EMERGENCY ENTRY: {signal.symbol} @ {action.price} (tracking_id={tracking.id})")
-        
-        # TODO: Send Telegram notification based on entry type
+            
+            # Send Telegram notification for emergency entry (treated as entry1)
+            await self._telegram.send_entry_hit(
+                tracking=tracking,
+                entry_type=1,
+                entry_price=str(action.price)
+            )
 
     async def _waiting_entry_expired(
         self,
@@ -284,7 +307,10 @@ class ActionProcessor:
 
         # Log event
         logger.info(f"✓ WAITING ENTRY EXPIRED: {tracking.signal.symbol} - {action.reason} (tracking_id={tracking.id})")
-        # TODO: Send Telegram notification: SIGNAL_CANCELLED
+        
+        # Send Telegram notification
+        await self._telegram.send_signal_cancelled(tracking, action.reason)
+        
         # TODO: Update statistics
 
     async def _signal_expired(
@@ -321,7 +347,10 @@ class ActionProcessor:
 
         # Log event
         logger.info(f"✓ SIGNAL EXPIRED: {tracking.signal.symbol} - {action.reason} at {action.expires_at} (tracking_id={tracking.id})")
-        # TODO: Send Telegram notification: SIGNAL_EXPIRED
+        
+        # Send Telegram notification
+        #await self._telegram.send_signal_closed(tracking, "expired")
+        
         # TODO: Update statistics (increment expired_signals counter)
 
     async def _stop_loss_hit(
@@ -350,7 +379,18 @@ class ActionProcessor:
 
         # Log event
         logger.info(f"✓ STOP LOSS HIT: {tracking.signal.symbol} @ {action.price} (tracking_id={tracking.id})")
-        # TODO: Send Telegram notification: SIGNAL_CLOSED
+        
+        # Calculate loss percentage for notification
+        if tracking.actual_entry_price:
+            loss_pct = abs(self._calculate_profit_percentage(
+                tracking.signal.direction,
+                tracking.actual_entry_price,
+                action.price,
+            ))
+            # Apply leverage to the loss percentage for display
+            leveraged_loss_pct = loss_pct * tracking.signal.leverage
+            await self._telegram.send_sl_hit(tracking, f"{leveraged_loss_pct:.2f}")
+        
         # TODO: Update statistics (loss)
 
     async def _take_profit_hit(
@@ -371,7 +411,7 @@ class ActionProcessor:
             profit_pct = Decimal("0")
 
         # Create TpHit record (unique constraint prevents duplicates)
-        await uow.tp_hits.create(
+        tp_hit = await uow.tp_hits.create(
             tracking_id=tracking.id,
             position=action.target_number,
             price=action.price,
@@ -398,7 +438,9 @@ class ActionProcessor:
 
         # Log event
         logger.info(f"✓ TP{action.target_number} HIT: {tracking.signal.symbol} @ {action.price} (+{profit_pct:.2f}%) (tracking_id={tracking.id})")
-        # TODO: Send Telegram notification: TARGET_HIT
+        
+        # Send Telegram notification using the just-created TpHit record
+        await self._telegram.send_tp_hit(tracking, tp_hit)
 
     async def _risk_freed(
         self,
@@ -426,7 +468,10 @@ class ActionProcessor:
 
         # Log event
         logger.info(f"✓ RISK FREED: {tracking.signal.symbol} @ {action.price} (tracking_id={tracking.id})")
-        # TODO: Send Telegram notification: SIGNAL_CLOSED (risk free)
+        
+        # Send Telegram notification
+        # await self._telegram.send_signal_closed(tracking, "risk_free")
+        
         # TODO: Update statistics (risk free)
 
     async def _tracking_completed(
@@ -454,7 +499,10 @@ class ActionProcessor:
 
         # Log event
         logger.info(f"✓ TRACKING COMPLETED: {tracking.signal.symbol} - all targets hit (tracking_id={tracking.id})")
-        # TODO: Send Telegram notification: SIGNAL_CLOSED (all targets)
+        
+        # Send Telegram notification
+        #await self._telegram.send_signal_closed(tracking, "all_targets_hit")
+        
         # TODO: Update statistics (win)
 
     def _calculate_profit_percentage(
