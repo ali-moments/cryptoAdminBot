@@ -47,16 +47,9 @@ services:
     volumes:
       - ./sessions:/app/sessions
       - ./generated:/app/generated
-      - ./.env:/app/.env
     depends_on:
       postgres:
         condition: service_healthy
-    networks:
-      - default
 
 volumes:
   postgres_data_prod:
-
-networks:
-  default:
-    driver: bridge
