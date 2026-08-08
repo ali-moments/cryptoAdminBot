@@ -100,20 +100,20 @@ async def main(session_name, api_id, api_hash, save_session=False):
 
 if __name__ == "__main__":
     # === YOUR CREDENTIALS ===
-    hand = input('do you wanna add another account?(y/n)')
-    if hand and hand.lower() in ['y', 'yes']:
-        app_id = input("enter your app id: ")
-        app_hash = input("enter your app hash: ")
-        session_name = input("enter your session name: ")
-        asyncio.run(main(session_name=session_name, api_id=app_id, api_hash=app_hash))
-    else:
-        asyncio.run(main(
-           session_name=os.path.join(os.environ["SESSIONS_DIR"], os.environ['READER_SESSION']),
-           api_id=os.environ['READER_API_ID'],
-           api_hash=os.environ['READER_API_HASH'],
-        ))
-        asyncio.run(main(
-           session_name=os.path.join(os.environ["SESSIONS_DIR"], os.environ['SENDER_SESSION']),
-           api_id=os.environ['SENDER_API_ID'],
-           api_hash=os.environ['SENDER_API_HASH'],
-        ))
+    # hand = input('do you wanna add another account?(y/n)')
+    # if hand and hand.lower() in ['y', 'yes']:
+    #     app_id = input("enter your app id: ")
+    #     app_hash = input("enter your app hash: ")
+    #     session_name = input("enter your session name: ")
+    #     asyncio.run(main(session_name=session_name, api_id=app_id, api_hash=app_hash))
+    # else:
+    asyncio.run(main(
+        session_name=os.path.join(os.environ["SESSIONS_DIR"], os.environ['READER_SESSION']),
+        api_id=os.environ['READER_API_ID'],
+        api_hash=os.environ['READER_API_HASH'],
+    ))
+    asyncio.run(main(
+        session_name=os.path.join(os.environ["SESSIONS_DIR"], os.environ['SENDER_SESSION']),
+        api_id=os.environ['SENDER_API_ID'],
+        api_hash=os.environ['SENDER_API_HASH'],
+    ))
