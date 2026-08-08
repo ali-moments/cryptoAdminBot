@@ -234,7 +234,7 @@ class BybitProvider(BaseProvider):
                 # Bybit sends "lastPrice" in snapshot and "price" in delta updates
                 # Delta updates may only contain orderbook/volume fields without price
                 price_str = tick_data.get("lastPrice") or tick_data.get("price")
-                
+
                 if not price_str:
                     # Delta update without price change - skip silently
                     return
@@ -255,10 +255,10 @@ class BybitProvider(BaseProvider):
                     )
                 )
 
-                logger.trace(
-                    "Bybit market update: {}",
-                    data,
-                )
+                # logger.trace(
+                #     "Bybit market update: {}",
+                #     data,
+                # )
 
         except Exception:
             logger.exception(

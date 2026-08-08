@@ -198,10 +198,10 @@ class ProviderManager:
         missing_symbols = required_symbols - current_symbols
         unused_symbols = current_symbols - required_symbols
         
-        # Log sync operation
+        # Log sync operation with provider context
         if missing_symbols or unused_symbols:
-            logger.debug(
-                f"Syncing subscriptions: +{len(missing_symbols)} -{len(unused_symbols)} "
+            logger.info(
+                f"SUBSCRIPTION SYNC [{self._active.value}]: +{len(missing_symbols)} -{len(unused_symbols)} "
                 f"(current: {len(current_symbols)}, required: {len(required_symbols)})"
             )
             
@@ -209,20 +209,33 @@ class ProviderManager:
                 logger.debug(f"Subscribing to: {sorted(missing_symbols)}")
             if unused_symbols:
                 logger.debug(f"Unsubscribing from: {sorted(unused_symbols)}")
+        else:
+            logger.debug(f"SUBSCRIPTION SYNC [{self._active.value}]: No changes needed (current: {len(current_symbols)} symbols)")
         
         # Subscribe to missing symbols
         for symbol in missing_symbols:
             try:
                 await self.subscribe(symbol)
+                logger.debug(f"✓ Subscribed to {symbol}")
             except Exception as e:
-                logger.error(f"Failed to subscribe to {symbol}: {e}")
+                logger.error(f"✗ Failed to subscribe to {symbol}: {e}")
         
         # Unsubscribe from unused symbols
         for symbol in unused_symbols:
             try:
                 await self.unsubscribe(symbol)
+                logger.debug(f"✓ Unsubscribed from {symbol}")
             except Exception as e:
-                logger.error(f"Failed to unsubscribe from {symbol}: {e}")
+                logger.error(f"✗ Failed to unsubscribe from {symbol}: {e}")
+        
+        # Final state check
+        final_symbols = set(self._subscriptions.keys())
+        if final_symbols != required_symbols:
+            missing_after = required_symbols - final_symbols
+            extra_after = final_symbols - required_symbols
+            logger.warning(
+                f"SUBSCRIPTION SYNC INCOMPLETE: missing={sorted(missing_after)}, extra={sorted(extra_after)}"
+            )
 
     def get_price(
         self,
@@ -285,19 +298,35 @@ class ProviderManager:
 
         logger.info(f"Switching from {old_provider.value} to {new_provider.value}")
 
-        # Connect to new provider
+        # Save current subscriptions before switching
+        subscriptions_to_transfer = dict(self._subscriptions)
+        
+        # Connect to new provider (this sets self._active = new_provider)
         if not await self._try_connect(new_provider):
             logger.error(f"Failed to switch to {new_provider.value}")
             return False
 
-        # Transfer subscriptions
-        if self._subscriptions:
-            logger.info(f"Transferring {len(self._subscriptions)} subscriptions to {new_provider.value}")
-            for symbol in list(self._subscriptions.keys()):
+        # Clear ProviderManager subscription state - it will be rebuilt during transfer
+        self._subscriptions.clear()
+
+        # Transfer subscriptions to the new provider
+        if subscriptions_to_transfer:
+            logger.info(f"Transferring {len(subscriptions_to_transfer)} subscriptions to {new_provider.value}")
+            
+            failed_subscriptions = []
+            for symbol, count in subscriptions_to_transfer.items():
                 try:
+                    # Subscribe once on the new provider - subscribe() method handles reference counting
                     await self.active_provider.subscribe(symbol)
+                    # Restore the reference count in our state
+                    self._subscriptions[symbol] = count
+                    logger.debug(f"Transferred {symbol} to {new_provider.value} (ref count: {count})")
                 except Exception as e:
-                    logger.error(f"Failed to subscribe to {symbol} on {new_provider.value}: {e}")
+                    logger.error(f"Failed to transfer {symbol} to {new_provider.value}: {e}")
+                    failed_subscriptions.append(symbol)
+            
+            if failed_subscriptions:
+                logger.warning(f"Failed to transfer {len(failed_subscriptions)} subscriptions: {failed_subscriptions}")
 
         # Disconnect old provider
         await self._disconnect_provider(old_provider)
@@ -310,7 +339,7 @@ class ProviderManager:
             )
         )
 
-        logger.success(f"Switched to {new_provider.value}")
+        logger.success(f"Switched to {new_provider.value} with {len(self._subscriptions)} active subscriptions")
         return True
 
     async def _health_check_loop(self) -> None:

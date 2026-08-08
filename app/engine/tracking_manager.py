@@ -8,6 +8,7 @@ from app.database.enums import TrackingStatus
 from app.engine.tracker import Tracker
 from app.market.cache import PriceCache
 from app.engine.action_processor import ActionProcessor
+from app.market.events import ProviderChangedEvent
 
 
 class TrackingManager:
@@ -37,6 +38,21 @@ class TrackingManager:
         # Runtime state: tracks which trackings have been initialized
         # in THIS engine session. Reset on restart.
         self._initialized_trackings: set[int] = set()
+
+    def reset_initialization_state(self) -> None:
+        """Reset initialization state to force re-initialization of all trackings.
+
+        Called after provider recovery to ensure trackings resume processing
+        even if they were already initialized before the provider failure.
+        """
+        count = len(self._initialized_trackings)
+        self._initialized_trackings.clear()
+        logger.info(f"Reset initialization state for {count} trackings - will re-initialize on next tick")
+
+    async def on_provider_changed(self, event: ProviderChangedEvent) -> None:
+        """Handle provider change events by resetting tracking initialization state."""
+        logger.info(f"Provider changed from {event.previous.value} to {event.current.value} - resetting tracking initialization")
+        self.reset_initialization_state()
 
     async def start(
         self,
@@ -109,6 +125,7 @@ class TrackingManager:
                 tick = self._cache.get(symbol)
 
                 if tick is None:
+                    logger.trace(f"No market data available for {symbol}, skipping processing")
                     continue
 
                 # Process each tracking
@@ -119,6 +136,8 @@ class TrackingManager:
                     # Check if this tracking needs initialization
                     if tracking.id not in self._initialized_trackings:
                         # First observation in this engine session
+                        logger.info(f"TRACKING STARTED: {symbol} (tracking_id={tracking.id}, status={tracking.status.value})")
+
                         # Delegate to existing entry rules for detection
                         init_actions = await self._initialize_tracking(tracking, tick)
 
@@ -128,11 +147,15 @@ class TrackingManager:
                         if init_actions:
                             # Initialization emitted actions (state transition)
                             # Process them and skip normal rules THIS cycle
+                            logger.debug(f"Processing {len(init_actions)} initialization actions for {symbol}")
                             await self._processor.process(tracking, init_actions, uow)
                             continue  # Move to next tracking
 
                         # Initialization emitted nothing
                         # Fall through to normal rules
+                    # else:
+                    #     # Tracking already initialized in this session
+                    #     logger.trace(f"TRACKING ACTIVE: {symbol} (tracking_id={tracking.id}, status={tracking.status.value})")
 
                     # ================================================
                     # NORMAL PROCESSING

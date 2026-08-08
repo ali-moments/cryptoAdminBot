@@ -253,10 +253,10 @@ class BinanceProvider(BaseProvider):
                 )
             )
 
-            logger.trace(
-                "Binance market update: {}",
-                data,
-            )
+            # logger.trace(
+            #     "Binance market update: {}",
+            #     data,
+            # )
 
         except Exception:
             logger.exception(

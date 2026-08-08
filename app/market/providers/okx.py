@@ -38,11 +38,11 @@ class OKXProvider(BaseProvider):
         For perpetual futures, we use the SWAP suffix.
         """
         symbol = symbol.upper()
-        
+
         # If already in OKX format, return as-is
         if "-" in symbol:
             return symbol
-        
+
         # Convert BTCUSDT -> BTC-USDT-SWAP
         if symbol.endswith("USDT"):
             base = symbol[:-4]  # Remove "USDT"
@@ -50,7 +50,7 @@ class OKXProvider(BaseProvider):
         elif symbol.endswith("USDC"):
             base = symbol[:-4]  # Remove "USDC"
             return f"{base}-USDC-SWAP"
-        
+
         # Fallback: assume it's base-USDT
         return f"{symbol}-USDT-SWAP"
 
@@ -126,7 +126,7 @@ class OKXProvider(BaseProvider):
         normalized_symbol = symbol.upper()
         # Convert to OKX format
         okx_symbol = self._normalize_to_okx(normalized_symbol)
-        
+
         # Store the mapping
         self._symbol_map[normalized_symbol] = okx_symbol
 
@@ -177,7 +177,7 @@ class OKXProvider(BaseProvider):
         if count == 1:
             # Get OKX format from map
             okx_symbol = self._symbol_map.get(normalized_symbol, self._normalize_to_okx(normalized_symbol))
-            
+
             payload = {
                 "op": "unsubscribe",
                 "args": [
@@ -287,7 +287,7 @@ class OKXProvider(BaseProvider):
                     # Normalize the symbol back to standard format
                     okx_inst_id = tick_data["instId"]
                     normalized_symbol = self._normalize_from_okx(okx_inst_id)
-                    
+
                     tick = PriceTick(
                         provider=self.name,
                         symbol=normalized_symbol,  # Use normalized symbol
@@ -304,11 +304,11 @@ class OKXProvider(BaseProvider):
                         )
                     )
 
-                    logger.trace(
-                        "OKX market update: {} -> {}",
-                        okx_inst_id,
-                        normalized_symbol,
-                    )
+                    # logger.trace(
+                    #     "OKX market update: {} -> {}",
+                    #     okx_inst_id,
+                    #     normalized_symbol,
+                    # )
 
         except Exception:
             logger.exception(

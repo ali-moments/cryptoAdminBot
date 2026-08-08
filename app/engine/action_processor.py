@@ -1,5 +1,5 @@
-import logging
 from decimal import Decimal
+from loguru import logger
 
 from app.database.enums import TrackingStatus, AuditEventType, Direction, EntryMethod
 from app.database.models import Tracking
@@ -13,9 +13,6 @@ from app.engine.actions import (
     TrackingCompleted,
     EntryType,
 )
-
-
-logger = logging.getLogger(__name__)
 
 
 class ActionProcessor:
@@ -48,6 +45,13 @@ class ActionProcessor:
             actions: List of actions to process
             uow: UnitOfWork instance to use for database operations
         """
+        if not actions:
+            return
+            
+        # # Log actions to be processed
+        # action_names = [action.__class__.__name__ for action in actions]
+        # logger.info(f"ACTION PROCESSING: {tracking.signal.symbol} (tracking_id={tracking.id}) - {len(actions)} actions: {', '.join(action_names)}")
+        
         for action in actions:
             # Check if already processed
             if await self._is_already_processed(tracking, action, uow):
@@ -57,6 +61,9 @@ class ActionProcessor:
                     action.__class__.__name__,
                 )
                 continue
+
+            # # Log individual action processing
+            # logger.info(f"PROCESSING ACTION: {action.__class__.__name__} for {tracking.signal.symbol}")
 
             # Route to handler
             match action:
@@ -145,13 +152,7 @@ class ActionProcessor:
                 },
             )
             
-            logger.info(
-                "Entry1 hit: tracking=%d signal=%d symbol=%s price=%s",
-                tracking.id,
-                tracking.signal_id,
-                signal.symbol,
-                action.price,
-            )
+            logger.info(f"✓ ENTRY1 HIT: {signal.symbol} @ {action.price} (tracking_id={tracking.id})")
         
         elif action.entry_type == EntryType.ENTRY_2:
             # ============================================================
@@ -195,13 +196,7 @@ class ActionProcessor:
                     },
                 )
                 
-                logger.info(
-                    "TP1 recalculated: tracking=%d original_tp1=%s new_tp1=%s first_entry=%s",
-                    tracking.id,
-                    original_tp1,
-                    new_tp1,
-                    first_entry_price,
-                )
+                logger.info(f"✓ TP1 RECALCULATED: {signal.symbol} {original_tp1} → {new_tp1} (tracking_id={tracking.id})")
             
             # Write entry2 audit log
             await uow.audit_logs.create(
@@ -215,13 +210,7 @@ class ActionProcessor:
                 },
             )
             
-            logger.info(
-                "Entry2 hit: tracking=%d signal=%d symbol=%s price=%s",
-                tracking.id,
-                tracking.signal_id,
-                signal.symbol,
-                action.price,
-            )
+            logger.info(f"✓ ENTRY2 HIT: {signal.symbol} @ {action.price} (tracking_id={tracking.id})")
         
         elif action.entry_type == EntryType.EMERGENCY_ENTRY:
             # ============================================================
@@ -258,14 +247,7 @@ class ActionProcessor:
                 },
             )
             
-            logger.info(
-                "Emergency entry hit: tracking=%d signal=%d symbol=%s price=%s calculated_emergency=%s",
-                tracking.id,
-                tracking.signal_id,
-                signal.symbol,
-                action.price,
-                calculated_emergency_price,
-            )
+            logger.info(f"✓ EMERGENCY ENTRY: {signal.symbol} @ {action.price} (tracking_id={tracking.id})")
         
         # TODO: Send Telegram notification based on entry type
 
@@ -298,13 +280,7 @@ class ActionProcessor:
         )
 
         # Log event
-        logger.info(
-            "Waiting entry expired: tracking=%d signal=%d symbol=%s reason=%s",
-            tracking.id,
-            tracking.signal_id,
-            tracking.signal.symbol,
-            action.reason,
-        )
+        logger.info(f"✓ WAITING ENTRY EXPIRED: {tracking.signal.symbol} - {action.reason} (tracking_id={tracking.id})")
         # TODO: Send Telegram notification: SIGNAL_CANCELLED
         # TODO: Update statistics
 
@@ -333,13 +309,7 @@ class ActionProcessor:
         )
 
         # Log event
-        logger.info(
-            "Stop loss hit: tracking=%d signal=%d symbol=%s price=%s",
-            tracking.id,
-            tracking.signal_id,
-            tracking.signal.symbol,
-            action.price,
-        )
+        logger.info(f"✓ STOP LOSS HIT: {tracking.signal.symbol} @ {action.price} (tracking_id={tracking.id})")
         # TODO: Send Telegram notification: SIGNAL_CLOSED
         # TODO: Update statistics (loss)
 
@@ -387,15 +357,7 @@ class ActionProcessor:
         )
 
         # Log event
-        logger.info(
-            "TP%d hit: tracking=%d signal=%d symbol=%s price=%s profit=%.2f%%",
-            action.target_number,
-            tracking.id,
-            tracking.signal_id,
-            tracking.signal.symbol,
-            action.price,
-            profit_pct,
-        )
+        logger.info(f"✓ TP{action.target_number} HIT: {tracking.signal.symbol} @ {action.price} (+{profit_pct:.2f}%) (tracking_id={tracking.id})")
         # TODO: Send Telegram notification: TARGET_HIT
 
     async def _risk_freed(
@@ -423,13 +385,7 @@ class ActionProcessor:
         )
 
         # Log event
-        logger.info(
-            "Risk freed: tracking=%d signal=%d symbol=%s price=%s",
-            tracking.id,
-            tracking.signal_id,
-            tracking.signal.symbol,
-            action.price,
-        )
+        logger.info(f"✓ RISK FREED: {tracking.signal.symbol} @ {action.price} (tracking_id={tracking.id})")
         # TODO: Send Telegram notification: SIGNAL_CLOSED (risk free)
         # TODO: Update statistics (risk free)
 
@@ -457,12 +413,7 @@ class ActionProcessor:
         )
 
         # Log event
-        logger.info(
-            "Tracking completed: tracking=%d signal=%d symbol=%s all_targets_hit=True",
-            tracking.id,
-            tracking.signal_id,
-            tracking.signal.symbol,
-        )
+        logger.info(f"✓ TRACKING COMPLETED: {tracking.signal.symbol} - all targets hit (tracking_id={tracking.id})")
         # TODO: Send Telegram notification: SIGNAL_CLOSED (all targets)
         # TODO: Update statistics (win)
 
