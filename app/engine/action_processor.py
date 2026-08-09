@@ -22,14 +22,14 @@ if TYPE_CHECKING:
 
 class ActionProcessor:
     """Executes side effects for tracking actions.
-    
+
     Responsibilities:
     - Process Tracker actions
     - Apply tracking state changes
     - Create internal tracking records (TpHit)
     - Write AuditLog entries
     - Emit structured logs
-    
+
     Transaction lifecycle is owned by TrackingManager.
     ActionProcessor uses the current transaction context.
     """
@@ -44,7 +44,7 @@ class ActionProcessor:
         uow: UnitOfWork,
     ) -> None:
         """Process actions with idempotency checks.
-        
+
         Args:
             tracking: Tracking object attached to an active session
             actions: List of actions to process
@@ -52,11 +52,11 @@ class ActionProcessor:
         """
         if not actions:
             return
-            
+
         # # Log actions to be processed
         # action_names = [action.__class__.__name__ for action in actions]
         # logger.info(f"ACTION PROCESSING: {tracking.signal.symbol} (tracking_id={tracking.id}) - {len(actions)} actions: {', '.join(action_names)}")
-        
+
         for action in actions:
             # Check if already processed
             if await self._is_already_processed(tracking, action, uow):
@@ -127,14 +127,14 @@ class ActionProcessor:
         uow: UnitOfWork,
     ) -> None:
         """Handle position entry.
-        
+
         Entry types:
         - ENTRY_1: Initial entry at entry1 price
         - ENTRY_2: Scaling entry at entry2 price (triggers TP1 recalculation)
         - EMERGENCY_ENTRY: Fallback entry after timeout
         """
         signal = tracking.signal
-        
+
         if action.entry_type == EntryType.ENTRY_1:
             # ============================================================
             # ENTRY_1: Initial position entry
@@ -143,10 +143,10 @@ class ActionProcessor:
             tracking.entry_method = EntryMethod.ENTRY_1
             tracking.actual_entry_price = action.price
             tracking.status = TrackingStatus.TRACKING
-            
+
             # Initialize peak price tracking
             tracking.peak_price_after_entry = action.price
-            
+
             # Write audit log
             await uow.audit_logs.create(
                 tracking_id=tracking.id,
@@ -158,23 +158,23 @@ class ActionProcessor:
                     "timestamp": action.timestamp.isoformat(),
                 },
             )
-            
+
             logger.info(f"✓ ENTRY1 HIT: {signal.symbol} @ {action.price} (tracking_id={tracking.id})")
-            
-            # Send Telegram notification
-            await self._telegram.send_entry_hit(
-                tracking=tracking,
-                entry_type=1,
-                entry_price=str(action.price),
-                uow=uow
-            )
-        
+
+            # # Send Telegram notification
+            # await self._telegram.send_entry_hit(
+            #     tracking=tracking,
+            #     entry_type=1,
+            #     entry_price=str(action.price),
+            #     uow=uow
+            # )
+
         elif action.entry_type == EntryType.ENTRY_2:
             # ============================================================
             # ENTRY_2: Scaling entry (DCA)
             # ============================================================
             tracking.entry2_touched = True
-            
+
             # Recalculate TP1
             # Formula: new_tp1 = FirstEntry + (original_tp1 - FirstEntry) / 2
             # FirstEntry is direction-dependent:
@@ -183,20 +183,20 @@ class ActionProcessor:
             if signal.targets and len(signal.entries) >= 2:
                 # Determine FirstEntry based on direction
                 sorted_entries = sorted(signal.entries, key=lambda e: e.price)
-                
+
                 if signal.direction == Direction.LONG:
                     # LONG: first entry is higher price
                     first_entry_price = sorted_entries[-1].price
                 else:
                     # SHORT: first entry is lower price
                     first_entry_price = sorted_entries[0].price
-                
+
                 original_tp1 = signal.targets[0].price
-                
+
                 # Calculate new TP1 (halfway between FirstEntry and original TP1)
                 new_tp1 = first_entry_price + (original_tp1 - first_entry_price) / Decimal("2")
                 tracking.current_tp1_price = new_tp1
-                
+
                 # Write TP1 recalculation audit log
                 await uow.audit_logs.create(
                     tracking_id=tracking.id,
@@ -210,9 +210,9 @@ class ActionProcessor:
                         "timestamp": action.timestamp.isoformat(),
                     },
                 )
-                
+
                 logger.info(f"✓ TP1 RECALCULATED: {signal.symbol} {original_tp1} → {new_tp1} (tracking_id={tracking.id})")
-            
+
             # Write entry2 audit log
             await uow.audit_logs.create(
                 tracking_id=tracking.id,
@@ -224,17 +224,18 @@ class ActionProcessor:
                     "timestamp": action.timestamp.isoformat(),
                 },
             )
-            
+
             logger.info(f"✓ ENTRY2 HIT: {signal.symbol} @ {action.price} (tracking_id={tracking.id})")
-            
+
             # Send Telegram notification
             await self._telegram.send_entry_hit(
                 tracking=tracking,
                 entry_type=2,
                 entry_price=str(action.price),
-                uow=uow
+                uow=uow,
+                target=new_tp1,
             )
-        
+
         elif action.entry_type == EntryType.EMERGENCY_ENTRY:
             # ============================================================
             # EMERGENCY_ENTRY: Fallback entry after timeout
@@ -247,16 +248,16 @@ class ActionProcessor:
             tracking.actual_entry_price = action.price
             tracking.emergency_entry_triggered_at = action.timestamp
             tracking.status = TrackingStatus.TRACKING
-            
+
             # Initialize peak price tracking
             tracking.peak_price_after_entry = action.price
-            
+
             # Calculate emergency entry price for audit log (debugging)
             # This is the same deterministic calculation used by EntryRule
             calculated_emergency_price = self._calculate_emergency_entry_price_for_audit(
                 signal=signal,
             )
-            
+
             # Write audit log
             await uow.audit_logs.create(
                 tracking_id=tracking.id,
@@ -269,16 +270,16 @@ class ActionProcessor:
                     "timestamp": action.timestamp.isoformat(),
                 },
             )
-            
+
             logger.info(f"✓ EMERGENCY ENTRY: {signal.symbol} @ {action.price} (tracking_id={tracking.id})")
-            
-            # Send Telegram notification for emergency entry (treated as entry1)
-            await self._telegram.send_entry_hit(
-                tracking=tracking,
-                entry_type=1,
-                entry_price=str(action.price),
-                uow=uow
-            )
+
+            # # Send Telegram notification for emergency entry (treated as entry1)
+            # await self._telegram.send_entry_hit(
+            #     tracking=tracking,
+            #     entry_type=1,
+            #     entry_price=str(action.price),
+            #     uow=uow
+            # )
 
     async def _waiting_entry_expired(
         self,
@@ -287,7 +288,7 @@ class ActionProcessor:
         uow: UnitOfWork,
     ) -> None:
         """Handle waiting entry expiration.
-        
+
         Reasons:
         - timeout: Signal expired after configured timeout
         - tp1_crossed: TP1 reached before entry (signal opportunity missed)
@@ -310,10 +311,10 @@ class ActionProcessor:
 
         # Log event
         logger.info(f"✓ WAITING ENTRY EXPIRED: {tracking.signal.symbol} - {action.reason} (tracking_id={tracking.id})")
-        
-        # Send Telegram notification
-        await self._telegram.send_signal_cancelled(tracking, action.reason, uow)
-        
+
+        # # Send Telegram notification
+        # await self._telegram.send_signal_cancelled(tracking, action.reason, uow)
+
         # TODO: Update statistics
 
     async def _signal_expired(
@@ -323,7 +324,7 @@ class ActionProcessor:
         uow: UnitOfWork,
     ) -> None:
         """Handle signal expiration due to 72-hour limit.
-        
+
         This is different from waiting entry expiration. Signal expiration
         can occur on any active tracking regardless of status when the
         72-hour lifetime is exceeded.
@@ -350,10 +351,10 @@ class ActionProcessor:
 
         # Log event
         logger.info(f"✓ SIGNAL EXPIRED: {tracking.signal.symbol} - {action.reason} at {action.expires_at} (tracking_id={tracking.id})")
-        
+
         # Send Telegram notification
         #await self._telegram.send_signal_closed(tracking, "expired", uow)
-        
+
         # TODO: Update statistics (increment expired_signals counter)
 
     async def _stop_loss_hit(
@@ -382,7 +383,7 @@ class ActionProcessor:
 
         # Log event
         logger.info(f"✓ STOP LOSS HIT: {tracking.signal.symbol} @ {action.price} (tracking_id={tracking.id})")
-        
+
         # Calculate loss percentage for notification
         if tracking.actual_entry_price:
             loss_pct = abs(self._calculate_profit_percentage(
@@ -393,7 +394,7 @@ class ActionProcessor:
             # Apply leverage to the loss percentage for display
             leveraged_loss_pct = loss_pct * tracking.signal.leverage
             await self._telegram.send_sl_hit(tracking, f"{leveraged_loss_pct:.2f}", uow)
-        
+
         # TODO: Update statistics (loss)
 
     async def _take_profit_hit(
@@ -441,7 +442,7 @@ class ActionProcessor:
 
         # Log event
         logger.info(f"✓ TP{action.target_number} HIT: {tracking.signal.symbol} @ {action.price} (+{profit_pct:.2f}%) (tracking_id={tracking.id})")
-        
+
         # Send Telegram notification using the just-created TpHit record
         await self._telegram.send_tp_hit(tracking, tp_hit, uow)
 
@@ -471,10 +472,10 @@ class ActionProcessor:
 
         # Log event
         logger.info(f"✓ RISK FREED: {tracking.signal.symbol} @ {action.price} (tracking_id={tracking.id})")
-        
+
         # Send Telegram notification
         # await self._telegram.send_signal_closed(tracking, "risk_free", uow)
-        
+
         # TODO: Update statistics (risk free)
 
     async def _tracking_completed(
@@ -502,10 +503,10 @@ class ActionProcessor:
 
         # Log event
         logger.info(f"✓ TRACKING COMPLETED: {tracking.signal.symbol} - all targets hit (tracking_id={tracking.id})")
-        
+
         # Send Telegram notification
         #await self._telegram.send_signal_closed(tracking, "all_targets_hit", uow)
-        
+
         # TODO: Update statistics (win)
 
     def _calculate_profit_percentage(
@@ -528,29 +529,29 @@ class ActionProcessor:
     ) -> Decimal | None:
         """
         Calculate emergency entry price for audit logging purposes.
-        
+
         This duplicates the logic from EntryRule for diagnostic purposes.
         The actual business logic uses EntryRule's calculation.
-        
+
         Formula:
         - LONG: emergency = tp1 + (tp1 - EntryHigh) / 4
         - SHORT: emergency = tp1 - (EntryHigh - tp1) / 4
-        
+
         EntryHigh is always the higher absolute price.
         """
         if not signal.entries or not signal.targets:
             return None
-        
+
         # EntryHigh is always the higher price
         sorted_entries = sorted(signal.entries, key=lambda e: e.price)
         entry_high_price = sorted_entries[-1].price
-        
+
         tp1_price = signal.targets[0].price
         direction = signal.direction
-        
+
         distance = abs(tp1_price - entry_high_price)
         quarter_distance = distance / Decimal("4")
-        
+
         if direction == Direction.LONG:
             return tp1_price + quarter_distance
         else:

@@ -84,13 +84,13 @@ class TelegramService:
         return sent_message
 
 
-    async def send_entry_hit(self, tracking: Tracking, entry_type: int, entry_price: str, uow: UnitOfWork) -> SentMessage | None:
+    async def send_entry_hit(self, tracking: Tracking, entry_type: int, entry_price: str, uow: UnitOfWork, target) -> SentMessage | None:
         """Send entry hit notification with image"""
         signal = tracking.signal
 
         # Format text message
         if entry_type == 2:
-            text = self._formatter.format_second_entry_hit()
+            text = self._formatter.format_second_entry_hit(target=target)
         else:
             text = self._formatter.format_first_entry_hit()
 

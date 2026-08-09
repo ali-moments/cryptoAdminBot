@@ -1,4 +1,6 @@
 from decimal import Decimal
+from datetime import datetime
+from random import choice
 import app.telegram.sender.emojies as emojies
 from app.telegram.sender.templates import MessageTemplates
 from app.database.models import TpHit
@@ -21,6 +23,33 @@ class TelegramFormatter:
             8: "هشتم",
             9: "نهم",
         }
+
+    def _normalize_number(self, value: Decimal | float | str) -> str:
+        """
+        Normalize number by removing unnecessary trailing zeros.
+        Examples:
+        23.63640000000 -> 23.6364
+        10.00 -> 10
+        0.50 -> 0.5
+        """
+        if isinstance(value, str):
+            try:
+                value = Decimal(value)
+            except:
+                return value
+
+        # Convert to Decimal if it's a float
+        if isinstance(value, float):
+            value = Decimal(str(value))
+
+        # Format as string and remove trailing zeros
+        formatted = f"{value:.10f}".rstrip('0').rstrip('.')
+
+        # Handle edge case where we might end up with empty string
+        if not formatted or formatted == '-':
+            return "0"
+
+        return formatted
 
     def _get_target_ordinal(self, target_position: int) -> str:
         return self.TARGET_ORDINALS.get(target_position, f'{target_position}ام')
@@ -65,19 +94,24 @@ class TelegramFormatter:
     def format_tp_hit(self, tp_hit: TpHit, leveraged_profit: Decimal | None = None):
         # Use leveraged profit if provided, otherwise use the database profit_percent
         profit_to_display = leveraged_profit if leveraged_profit is not None else tp_hit.profit_percent
-        
+
         text = ''.join(self.templates.TP_HIT.format(
             ordinal = self._get_target_ordinal(tp_hit.position),
-            profit = f"{profit_to_display:.2f}",
+            profit = self._normalize_number(profit_to_display),
             duration = self._calculate_duration(tp_hit.created_at, tp_hit.hit_at)
         ))
+        if tp_hit.position < 5:
+            text += ''.join(self.templates.TP_HIT_LIVE[tp_hit.position])
+        elif tp_hit.position >= 5:
+            text += choice(self.templates.TOP_TP)
         return text
 
     def format_first_entry_hit(self):
         return "first entry hit"
 
-    def format_second_entry_hit(self):
-        return "second Entry Hit"
+    def format_second_entry_hit(self, target) -> str:
+        text = ''.join(self.templates.ENTRY_HIT.format(target=self._normalize_number(target)))
+        return text
 
     def format_sl_hit(self, loss: str):
         text = ''.join(self.templates.SL_HIT.format(loss=loss))
@@ -87,12 +121,12 @@ class TelegramFormatter:
         direction_arrow = emojies.LONG_ARROW if signal.direction == "LONG" else emojies.SHORT_ARROW
 
         if len(signal.entries) == 1:
-            entry_text = f"{signal.entries[0]}"
+            entry_text = self._normalize_number(signal.entries[0])
         else:
-            entry_text = f"{signal.entries[0]} - {signal.entries[1]}"
+            entry_text = f"{self._normalize_number(signal.entries[0])} - {self._normalize_number(signal.entries[1])}"
 
-        target_lines = " | ".join([str(x) for x in signal.targets])
-        leverage = str(signal.leverage)
+        target_lines = " | ".join([self._normalize_number(x) for x in signal.targets])
+        leverage = self._normalize_number(signal.leverage)
         symbol = signal.symbol.replace('USDT', '')
 
         test = "".join(self.templates.SIGNAL.format(
@@ -101,7 +135,7 @@ class TelegramFormatter:
             direction_arrow=direction_arrow,
             entry_text=entry_text,
             target_lines=target_lines,
-            stop_loss=signal.stop_loss,
+            stop_loss=self._normalize_number(signal.stop_loss),
             leverage=leverage,
         ))
         return test
@@ -114,16 +148,18 @@ class TelegramFormatter:
             pnl_items.append(self.templates.PNL_ITEM.format(
                 symbol=item.symbol,
                 status=item.status,
-                pnl=item.pnl,
+                pnl=self._normalize_number(item.pnl),
                 emoji=self._get_pnl_emoji(item.status)
             ))
 
         content = '\n'.join(pnl_items)
-        footer = self.templates.PNL_FOOTER.format(pnl=f'{stats.total}')
+        footer = self.templates.PNL_FOOTER.format(pnl=self._normalize_number(stats.total))
         return header + content + footer
 
     def format_good_morning(self):
-        text = ''.join(self.templates.GOOD_MORNING)
+        day = datetime.now().day
+        text = ''.join(self.templates.GM_TEXTS[day])
+        text += self.templates.GM_FOOTER
         return text
 
     def format_good_night(self):
