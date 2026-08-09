@@ -54,7 +54,7 @@ class TelegramFormatter:
 
         return ", ".join(parts)
 
-    def _get_pnl_emoji(status: str) -> str:
+    def _get_pnl_emoji(self, status: str) -> str:
         if status.startswith('TP'):
             return emojies.PNL_ITEM_TARGET
         if status == 'STOP':
@@ -66,7 +66,7 @@ class TelegramFormatter:
         # Use leveraged profit if provided, otherwise use the database profit_percent
         profit_to_display = leveraged_profit if leveraged_profit is not None else tp_hit.profit_percent
         
-        text = '\n'.join(self.templates.TP_HIT.format(
+        text = ''.join(self.templates.TP_HIT.format(
             ordinal = self._get_target_ordinal(tp_hit.position),
             profit = f"{profit_to_display:.2f}",
             duration = self._calculate_duration(tp_hit.created_at, tp_hit.hit_at)
@@ -80,7 +80,7 @@ class TelegramFormatter:
         return "second Entry Hit"
 
     def format_sl_hit(self, loss: str):
-        text = '\n'.join(self.templates.SL_HIT.format(loss=loss))
+        text = ''.join(self.templates.SL_HIT.format(loss=loss))
         return text
 
     def format_signal(self, signal: SignalDTO):
@@ -95,7 +95,7 @@ class TelegramFormatter:
         leverage = str(signal.leverage)
         symbol = signal.symbol.replace('USDT', '')
 
-        test = "\n".join(self.templates.SIGNAL.format(
+        test = "".join(self.templates.SIGNAL.format(
             symbol=symbol,
             direction=signal.direction,
             direction_arrow=direction_arrow,
@@ -123,9 +123,9 @@ class TelegramFormatter:
         return header + content + footer
 
     def format_good_morning(self):
-        text = '\n'.join(self.templates.GOOD_MORNING)
+        text = ''.join(self.templates.GOOD_MORNING)
         return text
 
     def format_good_night(self):
-        text = '\n'.join(self.templates.GOOD_NIGHT)
+        text = ''.join(self.templates.GOOD_NIGHT)
         return text

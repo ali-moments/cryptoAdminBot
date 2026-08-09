@@ -35,8 +35,15 @@ class SignalDTO:
 
 @dataclass(slots=True)
 class PNLItem:
+    """
+    status:
+        - TP{number} 
+            eg: TP1, TP2, ... 
+        - OPEN
+        - STOP
+    """
     symbol: str
-    status: str
+    status: str 
     pnl: Decimal
 
 
