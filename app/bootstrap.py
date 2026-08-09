@@ -65,7 +65,7 @@ class Application:
 
     subscription_manager: SubscriptionManager
 
-    scheduler: AppScheduler
+    scheduler: AppScheduler | None
 
 
 
@@ -162,10 +162,8 @@ def build_application() -> Application:
 
     reader = TelegramReader(reader_manager)
 
-    # Create scheduler with telegram service
-    scheduler = AppScheduler(telegram_service)
-
-    return Application(
+    # Create application instance first
+    app = Application(
         registry=registry,
         parser_manager=parser_manager,
         validation=validation,
@@ -178,5 +176,13 @@ def build_application() -> Application:
         price_cache=price_cache,
         tracking_manager=tracking_manager,
         subscription_manager=subscription_manager,
-        scheduler=scheduler,
+        scheduler=None,  # Will be set below
     )
+
+    # Create scheduler with telegram service and app reference
+    scheduler = AppScheduler(telegram_service, app)
+    
+    # Set scheduler on app
+    app.scheduler = scheduler
+
+    return app

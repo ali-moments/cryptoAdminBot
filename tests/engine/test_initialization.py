@@ -11,6 +11,7 @@ Tests verify that the initialization phase:
 import pytest
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from unittest.mock import Mock
 
 from app.database.enums import Direction, SignalStatus, TrackingStatus, Provider, AuditEventType, EntryMethod
 from app.database.models import SignalSource
@@ -177,7 +178,8 @@ async def test_initialization_runs_once_per_session(async_engine, current_time):
         cache = PriceCache()
         tracker = Tracker()
         uow = UnitOfWork()
-        processor = ActionProcessor()
+        mock_telegram = Mock()
+        processor = ActionProcessor(telegram_service=mock_telegram)
         manager = TrackingManager(
             uow_factory=lambda: uow,
             tracker=tracker,
@@ -248,7 +250,8 @@ async def test_initialization_runs_again_after_restart(async_engine, current_tim
         cache1 = PriceCache()
         tracker1 = Tracker()
         uow1 = UnitOfWork()
-        processor1 = ActionProcessor()
+        mock_telegram1 = Mock()
+        processor1 = ActionProcessor(telegram_service=mock_telegram1)
         manager1 = TrackingManager(
             uow_factory=lambda: uow1,
             tracker=tracker1,
@@ -273,12 +276,13 @@ async def test_initialization_runs_again_after_restart(async_engine, current_tim
         # ==========================================
         # Simulate restart: new manager
         # ==========================================
-        del cache1, tracker1, manager1, uow1, processor1
+        del cache1, tracker1, manager1, uow1, processor1, mock_telegram1
         
         cache2 = PriceCache()
         tracker2 = Tracker()
         uow2 = UnitOfWork()
-        processor2 = ActionProcessor()
+        mock_telegram2 = Mock()
+        processor2 = ActionProcessor(telegram_service=mock_telegram2)
         manager2 = TrackingManager(
             uow_factory=lambda: uow2,
             tracker=tracker2,
@@ -339,7 +343,8 @@ async def test_initialization_gap_detection(async_engine, current_time):
         cache = PriceCache()
         tracker = Tracker()
         uow = UnitOfWork()
-        processor = ActionProcessor()
+        mock_telegram = Mock()
+        processor = ActionProcessor(telegram_service=mock_telegram)
         manager = TrackingManager(
             uow_factory=lambda: uow,
             tracker=tracker,
@@ -406,7 +411,8 @@ async def test_initialization_skips_normal_rules(async_engine, current_time):
         cache = PriceCache()
         tracker = Tracker()
         uow = UnitOfWork()
-        processor = ActionProcessor()
+        mock_telegram = Mock()
+        processor = ActionProcessor(telegram_service=mock_telegram)
         manager = TrackingManager(
             uow_factory=lambda: uow,
             tracker=tracker,
@@ -485,7 +491,8 @@ async def test_initialization_respects_database_state(async_engine, current_time
         cache = PriceCache()
         tracker = Tracker()
         uow = UnitOfWork()
-        processor = ActionProcessor()
+        mock_telegram = Mock()
+        processor = ActionProcessor(telegram_service=mock_telegram)
         manager = TrackingManager(
             uow_factory=lambda: uow,
             tracker=tracker,

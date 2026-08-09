@@ -18,6 +18,7 @@ import pytest
 import asyncio
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from unittest.mock import Mock
 
 from app.database.enums import Direction, SignalStatus, TrackingStatus, Provider, AuditEventType, EntryMethod
 from app.database.models import Signal, SignalEntry, SignalTarget, SignalSource

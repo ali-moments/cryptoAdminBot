@@ -73,9 +73,15 @@ def mock_tracking(mock_signal):
 
 
 @pytest.fixture
-def processor():
-    """Create ActionProcessor instance."""
-    return ActionProcessor()
+def mock_telegram_service():
+    """Create a mock TelegramService."""
+    return Mock()
+
+
+@pytest.fixture
+def processor(mock_telegram_service):
+    """Create ActionProcessor instance with mock TelegramService."""
+    return ActionProcessor(telegram_service=mock_telegram_service)
 
 
 class TestPositionEnteredEntry1:
