@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, UTC
 import math
 from decimal import Decimal
+from typing import TYPE_CHECKING
 from loguru import logger
 from app.core.dto import ValidatedSignal
 from app.database.enums import AuditEventType, Direction, SignalStatus, Provider, TrackingStatus
@@ -14,11 +15,16 @@ from app.database.models import (
 )
 from app.database.uow import UnitOfWork
 from app.services.settings import States
+from app.telegram.common.dto import SignalDTO
+
+if TYPE_CHECKING:
+    from app.services.telegram import TelegramService
 
 
 class SignalLifecycleService:
-    def __init__(self, states: States) -> None:
+    def __init__(self, states: States, telegram_service: "TelegramService | None" = None) -> None:
         self.states = states
+        self._telegram_service = telegram_service
 
     @staticmethod
     def _normalize_leverage(n: int) -> int:
@@ -146,6 +152,17 @@ class SignalLifecycleService:
         # - Exchange preferences
         return Provider.BINANCE
 
+    def _create_signal_dto(self, signal: Signal) -> SignalDTO:
+        """Convert database Signal model to SignalDTO for Telegram sending."""
+        return SignalDTO(
+            symbol=signal.symbol,
+            direction=signal.direction.value,
+            entries=[entry.price for entry in signal.entries],
+            targets=[target.price for target in signal.targets],
+            stop_loss=signal.stop_loss,
+            leverage=signal.leverage,
+        )
+
 
     async def create_signal(
         self,
@@ -267,5 +284,20 @@ class SignalLifecycleService:
             )
 
             logger.info("Tracking created for signal.")
+
+            # Send signal to Telegram channel
+            if self._telegram_service:
+                try:
+                    await uow.session.refresh(db_signal, ['entries', 'targets'])
+                    signal_dto = self._create_signal_dto(db_signal)
+                    sent_message = await self._telegram_service.send_signal(db_tracking, signal_dto)
+                    if sent_message:
+                        logger.info(f"Signal sent to Telegram for {db_signal.symbol}")
+                    else:
+                        logger.warning(f"Failed to send signal to Telegram for {db_signal.symbol}")
+                except Exception as e:
+                    logger.error(f"Error sending signal to Telegram: {e}")
+            else:
+                logger.warning("TelegramService not available, signal not sent to Telegram")
 
         return db_signal

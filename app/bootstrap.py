@@ -90,7 +90,20 @@ def build_application() -> Application:
     validation = ValidationService(registry)
     states = States()
 
-    lifecycle = SignalLifecycleService(states=states)
+    # Create TelegramService components first
+    svg_service = SvgService()
+    tg_sender = TelegramSender()
+    tg_formatter = TelegramFormatter()
+    telegram_service = TelegramService(
+        sender=tg_sender,
+        formatter=tg_formatter,
+        svg=svg_service,
+        states=states,
+        uow_factory=UnitOfWork,
+    )
+
+    # Now create lifecycle with telegram_service dependency
+    lifecycle = SignalLifecycleService(states=states, telegram_service=telegram_service)
 
     # Market components
     dispatcher = EventDispatcher()
@@ -118,18 +131,7 @@ def build_application() -> Application:
     # Engine components
     tracker = Tracker()
     
-    # Create TelegramService first so ActionProcessor can use it
-    svg_service = SvgService()
-    tg_sender = TelegramSender()
-    tg_formatter = TelegramFormatter()
-    telegram_service = TelegramService(
-        sender=tg_sender,
-        formatter=tg_formatter,
-        svg=svg_service,
-        states=states,
-        uow_factory=UnitOfWork,
-    )
-    
+    # TelegramService already created above
     action_processor = ActionProcessor(telegram_service)
 
     tracking_manager = TrackingManager(
