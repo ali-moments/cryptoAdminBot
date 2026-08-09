@@ -2,7 +2,7 @@ from decimal import Decimal
 from loguru import logger
 from typing import TYPE_CHECKING
 
-from app.database.enums import TrackingStatus, AuditEventType, Direction, EntryMethod, SignalStatus, MessageType
+from app.database.enums import TrackingStatus, AuditEventType, Direction, EntryMethod, SignalStatus
 from app.database.models import Tracking
 from app.database.uow import UnitOfWork
 from app.engine.actions import (
