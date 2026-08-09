@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, UTC
+from zoneinfo import ZoneInfo
 import math
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -25,6 +26,31 @@ class SignalLifecycleService:
     def __init__(self, states: States, telegram_service: "TelegramService | None" = None) -> None:
         self.states = states
         self._telegram_service = telegram_service
+
+    @staticmethod
+    def _is_in_quiet_hours() -> bool:
+        """
+        Check if current time falls in the quiet hours (22:00 to 5:20 Asia/Tehran).
+        Signals received during this period should be ignored.
+        
+        Returns True if in quiet hours, False otherwise.
+        """
+        tehran_tz = ZoneInfo("Asia/Tehran")
+        current_time = datetime.now(tehran_tz)
+        current_hour = current_time.hour
+        current_minute = current_time.minute
+        
+        # 22:00 to 23:59 (same day)
+        if current_hour >= 22:
+            return True
+        
+        # 00:00 to 5:20 (next day)
+        if current_hour < 5:
+            return True
+        if current_hour == 5 and current_minute <= 20:
+            return True
+        
+        return False
 
     @staticmethod
     def _normalize_leverage(n: int) -> int:
@@ -169,7 +195,31 @@ class SignalLifecycleService:
         signal: ValidatedSignal,
         source: SignalSource,
         uow: UnitOfWork,
-    ) -> Signal:
+    ) -> Signal|None:
+        # Check if we're in quiet hours (22:00 to 5:20 Asia/Tehran)
+        if self._is_in_quiet_hours():
+            logger.info(
+                f"Signal for {signal.symbol} ignored: received during quiet hours (22:00-5:20 Asia/Tehran)"
+            )
+            # Create audit log for ignored signal
+            await uow.audit_logs.add(
+                AuditLog(
+                    signal_id=None,
+                    event=AuditEventType.SIGNAL_REJECTED,
+                    payload={
+                        "symbol": signal.symbol,
+                        "direction": signal.direction.value,
+                        "source_id": source.id,
+                        "reason": "quiet_hours",
+                        "entries": str(signal.entries),
+                        "targets": str(signal.targets),
+                        "stop_loss": str(signal.stop_loss),
+                    }
+                )
+            )
+            await uow.commit()
+            return None
+        
         duplicate = await self._find_duplicate(
             signal=signal,
             uow=uow,
