@@ -165,7 +165,8 @@ class ActionProcessor:
             await self._telegram.send_entry_hit(
                 tracking=tracking,
                 entry_type=1,
-                entry_price=str(action.price)
+                entry_price=str(action.price),
+                uow=uow
             )
         
         elif action.entry_type == EntryType.ENTRY_2:
@@ -230,7 +231,8 @@ class ActionProcessor:
             await self._telegram.send_entry_hit(
                 tracking=tracking,
                 entry_type=2,
-                entry_price=str(action.price)
+                entry_price=str(action.price),
+                uow=uow
             )
         
         elif action.entry_type == EntryType.EMERGENCY_ENTRY:
@@ -274,7 +276,8 @@ class ActionProcessor:
             await self._telegram.send_entry_hit(
                 tracking=tracking,
                 entry_type=1,
-                entry_price=str(action.price)
+                entry_price=str(action.price),
+                uow=uow
             )
 
     async def _waiting_entry_expired(
@@ -309,7 +312,7 @@ class ActionProcessor:
         logger.info(f"✓ WAITING ENTRY EXPIRED: {tracking.signal.symbol} - {action.reason} (tracking_id={tracking.id})")
         
         # Send Telegram notification
-        await self._telegram.send_signal_cancelled(tracking, action.reason)
+        await self._telegram.send_signal_cancelled(tracking, action.reason, uow)
         
         # TODO: Update statistics
 
@@ -349,7 +352,7 @@ class ActionProcessor:
         logger.info(f"✓ SIGNAL EXPIRED: {tracking.signal.symbol} - {action.reason} at {action.expires_at} (tracking_id={tracking.id})")
         
         # Send Telegram notification
-        #await self._telegram.send_signal_closed(tracking, "expired")
+        #await self._telegram.send_signal_closed(tracking, "expired", uow)
         
         # TODO: Update statistics (increment expired_signals counter)
 
@@ -389,7 +392,7 @@ class ActionProcessor:
             ))
             # Apply leverage to the loss percentage for display
             leveraged_loss_pct = loss_pct * tracking.signal.leverage
-            await self._telegram.send_sl_hit(tracking, f"{leveraged_loss_pct:.2f}")
+            await self._telegram.send_sl_hit(tracking, f"{leveraged_loss_pct:.2f}", uow)
         
         # TODO: Update statistics (loss)
 
@@ -440,7 +443,7 @@ class ActionProcessor:
         logger.info(f"✓ TP{action.target_number} HIT: {tracking.signal.symbol} @ {action.price} (+{profit_pct:.2f}%) (tracking_id={tracking.id})")
         
         # Send Telegram notification using the just-created TpHit record
-        await self._telegram.send_tp_hit(tracking, tp_hit)
+        await self._telegram.send_tp_hit(tracking, tp_hit, uow)
 
     async def _risk_freed(
         self,
@@ -470,7 +473,7 @@ class ActionProcessor:
         logger.info(f"✓ RISK FREED: {tracking.signal.symbol} @ {action.price} (tracking_id={tracking.id})")
         
         # Send Telegram notification
-        # await self._telegram.send_signal_closed(tracking, "risk_free")
+        # await self._telegram.send_signal_closed(tracking, "risk_free", uow)
         
         # TODO: Update statistics (risk free)
 
@@ -501,7 +504,7 @@ class ActionProcessor:
         logger.info(f"✓ TRACKING COMPLETED: {tracking.signal.symbol} - all targets hit (tracking_id={tracking.id})")
         
         # Send Telegram notification
-        #await self._telegram.send_signal_closed(tracking, "all_targets_hit")
+        #await self._telegram.send_signal_closed(tracking, "all_targets_hit", uow)
         
         # TODO: Update statistics (win)
 

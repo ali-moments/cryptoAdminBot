@@ -290,7 +290,7 @@ class SignalLifecycleService:
                 try:
                     await uow.session.refresh(db_signal, ['entries', 'targets'])
                     signal_dto = self._create_signal_dto(db_signal)
-                    sent_message = await self._telegram_service.send_signal(db_tracking, signal_dto)
+                    sent_message = await self._telegram_service.send_signal(db_tracking, signal_dto, uow)
                     if sent_message:
                         logger.info(f"Signal sent to Telegram for {db_signal.symbol}")
                     else:
