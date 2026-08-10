@@ -259,30 +259,34 @@ class EntryRule:
         """
         Calculate emergency entry price.
 
-        Formula (both LONG and SHORT):
-        - Emergency = TP1 + (TP1 - EntryHigh) / 4 for LONG
-        - Emergency = TP1 - (EntryHigh - TP1) / 4 for SHORT
+        Formula:
+        - LONG: emergency_entry = EntryHigh + (TP1 - EntryHigh) / 4
+        - SHORT: emergency_entry = EntryLow - (EntryLow - TP1) / 4
 
-        EntryHigh is always the higher absolute price, regardless of direction.
+        For LONG: EntryHigh is the higher price, emergency is between EntryHigh and TP1
+        For SHORT: EntryLow is the lower price, emergency is between EntryLow and TP1
 
-        This places emergency entry BEYOND TP1 (worse entry, but catches late signals).
+        This places emergency entry closer to TP1 (worse entry, but catches late signals).
         """
         if not signal.entries or tp1_price is None:
             return None
 
-        # EntryHigh is always the higher price
         sorted_entries = sorted(signal.entries, key=lambda e: e.price)
-        entry_high_price = sorted_entries[-1].price
-
-        distance = abs(tp1_price - entry_high_price)
-        quarter_distance = distance / Decimal("4")
 
         if direction == Direction.LONG:
-            # Emergency entry above TP1
-            return tp1_price + quarter_distance
+            # LONG: EntryHigh is the higher price
+            entry_high_price = sorted_entries[-1].price
+            distance = tp1_price - entry_high_price
+            quarter_distance = distance / Decimal("4")
+            # Emergency entry is EntryHigh + quarter distance toward TP1
+            return entry_high_price + quarter_distance
         else:
-            # Emergency entry below TP1
-            return tp1_price - quarter_distance
+            # SHORT: EntryLow is the lower price
+            entry_low_price = sorted_entries[0].price
+            distance = entry_low_price - tp1_price
+            quarter_distance = distance / Decimal("4")
+            # Emergency entry is EntryLow - quarter distance toward TP1
+            return entry_low_price - quarter_distance
 
 
     def _get_second_entry(self, signal) -> SignalEntry | None:
