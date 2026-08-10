@@ -60,14 +60,32 @@ class EntryRule:
 
         # ============================================================
         # State: TRACKING (position active)
+        # Check both entry1 and entry2 (entry1 may still be valid after emergency entry)
         # ============================================================
-        # Check if entry2 is allowed and hit
-        return await self._handle_entry2(
+        actions = []
+        
+        # Check entry1 if entered via emergency entry
+        # After emergency entry, entry1 price may still be touched
+        if tracking.entry_method == EntryMethod.EMERGENCY_ENTRY and first_entry:
+            if self._entry_hit(signal.direction, current_price, first_entry.price):
+                actions.append(
+                    PositionEntered(
+                        entry_type=EntryType.ENTRY_1,
+                        price=first_entry.price,
+                        timestamp=current_time,
+                    )
+                )
+        
+        # Check entry2 (existing logic)
+        entry2_actions = await self._handle_entry2(
             tracking=tracking,
             current_price=current_price,
             current_time=current_time,
             second_entry=second_entry,
         )
+        actions.extend(entry2_actions)
+        
+        return actions
 
     async def _handle_waiting_entry(
         self,
@@ -168,7 +186,7 @@ class EntryRule:
                 return [
                     PositionEntered(
                         entry_type=EntryType.EMERGENCY_ENTRY,
-                        price=emergency_price,
+                        price=current_price,
                         timestamp=current_time,
                     )
                 ]

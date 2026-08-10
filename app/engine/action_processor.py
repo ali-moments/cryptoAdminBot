@@ -98,7 +98,15 @@ class ActionProcessor:
             case PositionEntered():
                 # Check based on entry type
                 if action.entry_type == EntryType.ENTRY_1:
-                    return tracking.entry1_touched
+                    # Special case: After emergency entry, check audit log to prevent duplicates
+                    # Normal case uses entry_method to determine if already processed
+                    if tracking.entry_method == EntryMethod.EMERGENCY_ENTRY:
+                        # Query audit log to see if ENTRY1_HIT was already recorded
+                        logs = await uow.audit_logs.by_tracking(tracking.id)
+                        return any(log.event == AuditEventType.ENTRY1_HIT for log in logs)
+                    else:
+                        # Normal flow: ENTRY_1 is processed if entry1_touched and method is ENTRY_1
+                        return tracking.entry1_touched and tracking.entry_method == EntryMethod.ENTRY_1
                 elif action.entry_type == EntryType.ENTRY_2:
                     return tracking.entry2_touched
                 elif action.entry_type == EntryType.EMERGENCY_ENTRY:
@@ -140,12 +148,15 @@ class ActionProcessor:
             # ENTRY_1: Initial position entry
             # ============================================================
             tracking.entry1_touched = True
-            tracking.entry_method = EntryMethod.ENTRY_1
-            tracking.actual_entry_price = action.price
-            tracking.status = TrackingStatus.TRACKING
-
-            # Initialize peak price tracking
-            tracking.peak_price_after_entry = action.price
+            
+            # Only set entry_method and actual_entry_price if not already set by emergency entry
+            # This preserves emergency entry state if entry1 is touched after emergency
+            if tracking.entry_method != EntryMethod.EMERGENCY_ENTRY:
+                tracking.entry_method = EntryMethod.ENTRY_1
+                tracking.actual_entry_price = action.price
+                tracking.status = TrackingStatus.TRACKING
+                # Initialize peak price tracking
+                tracking.peak_price_after_entry = action.price
 
             # Write audit log
             await uow.audit_logs.create(
@@ -172,6 +183,7 @@ class ActionProcessor:
         elif action.entry_type == EntryType.ENTRY_2:
             # ============================================================
             # ENTRY_2: Scaling entry (DCA)
+            # Note: entry_method is NOT modified here - preserves EMERGENCY_ENTRY if set
             # ============================================================
             tracking.entry2_touched = True
 

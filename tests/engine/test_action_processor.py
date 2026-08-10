@@ -75,7 +75,8 @@ def mock_tracking(mock_signal):
 @pytest.fixture
 def processor():
     """Create ActionProcessor instance."""
-    return ActionProcessor()
+    mock_telegram = AsyncMock()
+    return ActionProcessor(telegram_service=mock_telegram)
 
 
 class TestPositionEnteredEntry1:
@@ -120,7 +121,9 @@ class TestPositionEnteredEntry1:
     @pytest.mark.asyncio
     async def test_duplicate_entry1_is_ignored(self, processor, mock_tracking, mock_uow):
         """Test that duplicate ENTRY_1 action is ignored."""
+        # Setup: set both flags to indicate ENTRY_1 was already processed
         mock_tracking.entry1_touched = True
+        mock_tracking.entry_method = EntryMethod.ENTRY_1
 
         action = PositionEntered(
             entry_type=EntryType.ENTRY_1,
@@ -669,3 +672,271 @@ class TestProfitCalculation:
         
         # Verify it's quantized to 2 decimal places
         assert profit == profit.quantize(Decimal("0.01"))
+
+
+class TestEmergencyEntryBusinessRule:
+    """Tests for emergency entry preservation business rule."""
+
+    @pytest.mark.asyncio
+    async def test_normal_entry1_flow(self, processor, mock_tracking, mock_uow):
+        """Test normal entry1 sets entry_method and price correctly."""
+        action = PositionEntered(
+            entry_type=EntryType.ENTRY_1,
+            price=Decimal("48000.00"),
+            timestamp=datetime.now(UTC),
+        )
+
+        await processor.process(mock_tracking, [action], mock_uow)
+
+        assert mock_tracking.entry1_touched is True
+        assert mock_tracking.entry_method == EntryMethod.ENTRY_1
+        assert mock_tracking.actual_entry_price == Decimal("48000.00")
+        assert mock_tracking.emergency_entry_triggered_at is None
+
+    @pytest.mark.asyncio
+    async def test_emergency_entry_basic_state(self, processor, mock_tracking, mock_signal, mock_uow):
+        """Test emergency entry sets correct state and preserves entry prices."""
+        # Store original entry prices
+        original_entry1_price = mock_signal.entries[0].price
+        original_entry2_price = mock_signal.entries[1].price
+
+        action = PositionEntered(
+            entry_type=EntryType.EMERGENCY_ENTRY,
+            price=Decimal("49000.00"),
+            timestamp=datetime.now(UTC),
+        )
+
+        await processor.process(mock_tracking, [action], mock_uow)
+
+        # Verify emergency entry state
+        assert mock_tracking.entry1_touched is True
+        assert mock_tracking.entry_method == EntryMethod.EMERGENCY_ENTRY
+        assert mock_tracking.actual_entry_price == Decimal("49000.00")
+        assert mock_tracking.emergency_entry_triggered_at == action.timestamp
+        assert mock_tracking.status == TrackingStatus.TRACKING
+
+        # Verify entry prices remain unchanged
+        assert mock_signal.entries[0].price == original_entry1_price
+        assert mock_signal.entries[1].price == original_entry2_price
+
+    @pytest.mark.asyncio
+    async def test_emergency_then_entry1_preserves_emergency_state(self, processor, mock_tracking, mock_uow):
+        """Test that entry1 after emergency preserves emergency entry state."""
+        # First: emergency entry
+        emergency_action = PositionEntered(
+            entry_type=EntryType.EMERGENCY_ENTRY,
+            price=Decimal("49000.00"),
+            timestamp=datetime.now(UTC),
+        )
+        await processor.process(mock_tracking, [emergency_action], mock_uow)
+
+        # Store emergency state
+        emergency_timestamp = mock_tracking.emergency_entry_triggered_at
+        emergency_price = mock_tracking.actual_entry_price
+
+        # Second: entry1 is touched
+        entry1_action = PositionEntered(
+            entry_type=EntryType.ENTRY_1,
+            price=Decimal("48000.00"),
+            timestamp=datetime.now(UTC),
+        )
+        await processor.process(mock_tracking, [entry1_action], mock_uow)
+
+        # Verify emergency state is preserved
+        assert mock_tracking.entry_method == EntryMethod.EMERGENCY_ENTRY
+        assert mock_tracking.actual_entry_price == emergency_price
+        assert mock_tracking.emergency_entry_triggered_at == emergency_timestamp
+        
+        # entry1_touched should remain True (was already True from emergency)
+        assert mock_tracking.entry1_touched is True
+
+    @pytest.mark.asyncio
+    async def test_emergency_then_entry2_preserves_emergency_state(self, processor, mock_tracking, mock_uow):
+        """Test that entry2 after emergency preserves emergency entry state."""
+        # First: emergency entry
+        emergency_action = PositionEntered(
+            entry_type=EntryType.EMERGENCY_ENTRY,
+            price=Decimal("49000.00"),
+            timestamp=datetime.now(UTC),
+        )
+        await processor.process(mock_tracking, [emergency_action], mock_uow)
+
+        emergency_timestamp = mock_tracking.emergency_entry_triggered_at
+        emergency_price = mock_tracking.actual_entry_price
+
+        # Second: entry2 is touched
+        entry2_action = PositionEntered(
+            entry_type=EntryType.ENTRY_2,
+            price=Decimal("47000.00"),
+            timestamp=datetime.now(UTC),
+        )
+        await processor.process(mock_tracking, [entry2_action], mock_uow)
+
+        # Verify emergency state is preserved
+        assert mock_tracking.entry_method == EntryMethod.EMERGENCY_ENTRY
+        assert mock_tracking.actual_entry_price == emergency_price
+        assert mock_tracking.emergency_entry_triggered_at == emergency_timestamp
+        assert mock_tracking.entry2_touched is True
+
+    @pytest.mark.asyncio
+    async def test_emergency_then_entry1_then_entry2(self, processor, mock_tracking, mock_uow):
+        """Test emergency → entry1 → entry2 flow preserves emergency state."""
+        # Emergency entry
+        await processor.process(mock_tracking, [
+            PositionEntered(
+                entry_type=EntryType.EMERGENCY_ENTRY,
+                price=Decimal("49000.00"),
+                timestamp=datetime.now(UTC),
+            )
+        ], mock_uow)
+
+        emergency_state = {
+            'method': mock_tracking.entry_method,
+            'price': mock_tracking.actual_entry_price,
+            'timestamp': mock_tracking.emergency_entry_triggered_at,
+        }
+
+        # Entry1
+        await processor.process(mock_tracking, [
+            PositionEntered(
+                entry_type=EntryType.ENTRY_1,
+                price=Decimal("48000.00"),
+                timestamp=datetime.now(UTC),
+            )
+        ], mock_uow)
+
+        # Entry2
+        await processor.process(mock_tracking, [
+            PositionEntered(
+                entry_type=EntryType.ENTRY_2,
+                price=Decimal("47000.00"),
+                timestamp=datetime.now(UTC),
+            )
+        ], mock_uow)
+
+        # Verify emergency state preserved throughout
+        assert mock_tracking.entry_method == emergency_state['method']
+        assert mock_tracking.actual_entry_price == emergency_state['price']
+        assert mock_tracking.emergency_entry_triggered_at == emergency_state['timestamp']
+        assert mock_tracking.entry1_touched is True
+        assert mock_tracking.entry2_touched is True
+
+    @pytest.mark.asyncio
+    async def test_emergency_then_entry2_then_entry1(self, processor, mock_tracking, mock_uow):
+        """Test emergency → entry2 → entry1 flow preserves emergency state."""
+        # Emergency entry
+        await processor.process(mock_tracking, [
+            PositionEntered(
+                entry_type=EntryType.EMERGENCY_ENTRY,
+                price=Decimal("49000.00"),
+                timestamp=datetime.now(UTC),
+            )
+        ], mock_uow)
+
+        emergency_state = {
+            'method': mock_tracking.entry_method,
+            'price': mock_tracking.actual_entry_price,
+            'timestamp': mock_tracking.emergency_entry_triggered_at,
+        }
+
+        # Entry2 first
+        await processor.process(mock_tracking, [
+            PositionEntered(
+                entry_type=EntryType.ENTRY_2,
+                price=Decimal("47000.00"),
+                timestamp=datetime.now(UTC),
+            )
+        ], mock_uow)
+
+        # Then Entry1
+        await processor.process(mock_tracking, [
+            PositionEntered(
+                entry_type=EntryType.ENTRY_1,
+                price=Decimal("48000.00"),
+                timestamp=datetime.now(UTC),
+            )
+        ], mock_uow)
+
+        # Verify emergency state preserved throughout
+        assert mock_tracking.entry_method == emergency_state['method']
+        assert mock_tracking.actual_entry_price == emergency_state['price']
+        assert mock_tracking.emergency_entry_triggered_at == emergency_state['timestamp']
+        assert mock_tracking.entry1_touched is True
+        assert mock_tracking.entry2_touched is True
+
+    @pytest.mark.asyncio
+    async def test_idempotency_entry1_after_emergency_allows_once(self, processor, mock_tracking, mock_uow):
+        """Test that entry1 can be processed once after emergency, but not twice."""
+        # Setup: mock audit_logs.by_tracking to return empty list initially
+        mock_uow.audit_logs.by_tracking.return_value = []
+        
+        # Emergency entry
+        await processor.process(mock_tracking, [
+            PositionEntered(
+                entry_type=EntryType.EMERGENCY_ENTRY,
+                price=Decimal("49000.00"),
+                timestamp=datetime.now(UTC),
+            )
+        ], mock_uow)
+
+        mock_uow.audit_logs.create.reset_mock()
+        mock_uow.audit_logs.by_tracking.reset_mock()
+        
+        # Still no ENTRY1_HIT audit log
+        mock_uow.audit_logs.by_tracking.return_value = []
+
+        # Entry1 first time - should process
+        await processor.process(mock_tracking, [
+            PositionEntered(
+                entry_type=EntryType.ENTRY_1,
+                price=Decimal("48000.00"),
+                timestamp=datetime.now(UTC),
+            )
+        ], mock_uow)
+
+        assert mock_uow.audit_logs.create.call_count == 1
+
+        mock_uow.audit_logs.create.reset_mock()
+        mock_uow.audit_logs.by_tracking.reset_mock()
+
+        # Now mock that ENTRY1_HIT audit log exists
+        mock_entry1_log = Mock()
+        mock_entry1_log.event = AuditEventType.ENTRY1_HIT
+        mock_uow.audit_logs.by_tracking.return_value = [mock_entry1_log]
+
+        # Entry1 second time - should be blocked by idempotency
+        await processor.process(mock_tracking, [
+            PositionEntered(
+                entry_type=EntryType.ENTRY_1,
+                price=Decimal("48000.00"),
+                timestamp=datetime.now(UTC),
+            )
+        ], mock_uow)
+
+        assert mock_uow.audit_logs.create.call_count == 0
+
+
+class TestEmergencyEntryActualPrice:
+    """Test that emergency entry uses actual market price, not the threshold."""
+
+    @pytest.mark.asyncio
+    async def test_emergency_entry_uses_current_market_price(self, processor, mock_tracking, mock_uow):
+        """
+        Verify that emergency entry records the actual market price.
+        
+        The emergency threshold might be 50000.00, but when triggered,
+        the action should contain the actual current market price (e.g., 50123.45).
+        """
+        actual_market_price = Decimal("50123.45")
+        
+        action = PositionEntered(
+            entry_type=EntryType.EMERGENCY_ENTRY,
+            price=actual_market_price,  # This is current_price from the market tick
+            timestamp=datetime.now(UTC),
+        )
+
+        await processor.process(mock_tracking, [action], mock_uow)
+
+        # Verify actual_entry_price is set to the actual market price
+        assert mock_tracking.actual_entry_price == actual_market_price
+        assert mock_tracking.entry_method == EntryMethod.EMERGENCY_ENTRY
