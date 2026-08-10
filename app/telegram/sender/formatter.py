@@ -91,14 +91,14 @@ class TelegramFormatter:
         else:
             return emojies.PNL_ITEM_OPEN
 
-    def format_tp_hit(self, tp_hit: TpHit, leveraged_profit: Decimal | None = None):
+    def format_tp_hit(self, tp_hit: TpHit, created_at, leveraged_profit: Decimal | None = None):
         # Use leveraged profit if provided, otherwise use the database profit_percent
         profit_to_display = leveraged_profit if leveraged_profit is not None else tp_hit.profit_percent
 
         text = ''.join(self.templates.TP_HIT.format(
             ordinal = self._get_target_ordinal(tp_hit.position),
             profit = self._normalize_number(profit_to_display),
-            duration = self._calculate_duration(tp_hit.created_at, tp_hit.hit_at)
+            duration = self._calculate_duration(created_at, tp_hit.hit_at)
         ))
         if tp_hit.position < 5:
             text += ''.join(self.templates.TP_HIT_LIVE[tp_hit.position])

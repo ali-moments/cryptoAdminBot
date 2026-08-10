@@ -153,7 +153,7 @@ class TelegramService:
         # Calculate leveraged profit percentage for display
         leveraged_profit = tp_hit.profit_percent * signal.leverage
 
-        caption = self._formatter.format_tp_hit(tp_hit=tp_hit, leveraged_profit=leveraged_profit)
+        caption = self._formatter.format_tp_hit(tp_hit=tp_hit, created_at=tracking.created_at, leveraged_profit=leveraged_profit)
 
         # Generate profit shot image
         profit_dto = ProfitShotDTO(
