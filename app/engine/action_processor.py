@@ -313,7 +313,7 @@ class ActionProcessor:
         logger.info(f"✓ WAITING ENTRY EXPIRED: {tracking.signal.symbol} - {action.reason} (tracking_id={tracking.id})")
 
         # # Send Telegram notification
-        # await self._telegram.send_signal_cancelled(tracking, action.reason, uow)
+        await self._telegram.send_signal_cancelled(tracking, action.reason, uow)
 
         # TODO: Update statistics
 

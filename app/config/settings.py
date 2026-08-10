@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     # Engine
     # =========================
 
-    emergency_entry_timeout: int = Field(alias="EMERGENCY_ENTRY_TIMEOUT", default=5)
+    emergency_entry_timeout: int = Field(alias="EMERGENCY_ENTRY_TIMEOUT", default=3)
     signal_entry_timeout: int = Field(alias="SIGNAL_ENTRY_TIMEOUT", default=2)
 
     # =========================
