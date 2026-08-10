@@ -60,11 +60,11 @@ class ActionProcessor:
         for action in actions:
             # Check if already processed
             if await self._is_already_processed(tracking, action, uow):
-                logger.debug(
-                    "Action already processed, skipping: tracking=%d action=%s",
-                    tracking.id,
-                    action.__class__.__name__,
-                )
+                # logger.debug(
+                #     "Action already processed, skipping: tracking=%d action=%s",
+                #     tracking.id,
+                #     action.__class__.__name__,
+                # )
                 continue
 
             # # Log individual action processing
@@ -148,7 +148,7 @@ class ActionProcessor:
             # ENTRY_1: Initial position entry
             # ============================================================
             tracking.entry1_touched = True
-            
+
             # Only set entry_method and actual_entry_price if not already set by emergency entry
             # This preserves emergency entry state if entry1 is touched after emergency
             if tracking.entry_method != EntryMethod.EMERGENCY_ENTRY:
@@ -527,13 +527,13 @@ class ActionProcessor:
     def _get_effective_entry_price(self, tracking: Tracking) -> Decimal | None:
         """
         Calculate the effective entry price for profit/loss calculations.
-        
+
         If both entry1 and entry2 are touched, returns the average: (entry1 + entry2) / 2
         Otherwise, returns the actual_entry_price.
         """
         if not tracking.actual_entry_price:
             return None
-            
+
         # If both entries are touched, calculate average entry
         if tracking.entry1_touched and tracking.entry2_touched:
             signal_entries = tracking.signal.entries
@@ -544,7 +544,7 @@ class ActionProcessor:
                 # Return average
                 avg_entry = (entry1_price + entry2_price) / Decimal("2")
                 return avg_entry.quantize(Decimal("0.00000001"))
-        
+
         # Otherwise, use the actual entry price
         return tracking.actual_entry_price
 
