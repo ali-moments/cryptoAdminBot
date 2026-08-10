@@ -1,13 +1,13 @@
 from datetime import timedelta
 from decimal import Decimal
 
+from app.config.settings import settings
 from app.database.models import Tracking, SignalEntry
 from app.market.dto import PriceTick
 from app.engine.actions import WaitingEntryExpired
 
 
 class WaitingEntryRule:
-    WAITING_TIMEOUT = timedelta(hours=2)
     ENTRY_EXTENSION_RATIO = Decimal("0.25")
 
     async def apply(
@@ -23,8 +23,9 @@ class WaitingEntryRule:
 
         signal = tracking.signal
 
-        # Expired
-        if tick.timestamp >= signal.created_at + self.WAITING_TIMEOUT:
+        # Expired - check against settings.signal_entry_timeout (in hours)
+        waiting_timeout = timedelta(hours=settings.signal_entry_timeout)
+        if tick.timestamp >= signal.created_at + waiting_timeout:
             return [
                 WaitingEntryExpired(
                     reason="timeout",
