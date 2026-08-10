@@ -155,13 +155,21 @@ class TelegramService:
 
         caption = self._formatter.format_tp_hit(tp_hit=tp_hit, created_at=tracking.created_at, leveraged_profit=leveraged_profit)
 
+        # Calculate effective entry price (average if both entries touched)
+        effective_entry_price = tracking.actual_entry_price
+        if tracking.entry1_touched and tracking.entry2_touched and len(signal.entries) >= 2:
+            from decimal import Decimal
+            entry1_price = signal.entries[0].price
+            entry2_price = signal.entries[1].price
+            effective_entry_price = (entry1_price + entry2_price) / Decimal("2")
+
         # Generate profit shot image
         profit_dto = ProfitShotDTO(
             symbol=signal.symbol,
             direction=signal.direction.value,
             leverage=signal.leverage,
             pnl=f"{leveraged_profit:.2f}",
-            entry_price=str(tracking.actual_entry_price),
+            entry_price=str(effective_entry_price),
             exit_price=str(tp_hit.price),
             datetime_str=self._tehran_now_str()
         )

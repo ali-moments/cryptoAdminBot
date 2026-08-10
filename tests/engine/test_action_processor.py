@@ -387,6 +387,108 @@ class TestTakeProfitHit:
         assert profit == Decimal("8.33")
 
     @pytest.mark.asyncio
+    async def test_calculates_profit_with_average_entry_both_entries_touched_long(self, processor, mock_tracking, mock_signal, mock_uow):
+        """Test profit calculation uses average entry when both entries are touched (LONG)."""
+        # Setup: Both entries touched
+        mock_tracking.entry1_touched = True
+        mock_tracking.entry2_touched = True
+        mock_tracking.actual_entry_price = Decimal("50000.00")  # Entry1 price
+        mock_tracking.signal.direction = Direction.LONG
+        
+        # Signal has two entries
+        from unittest.mock import Mock
+        entry1 = Mock()
+        entry1.price = Decimal("50000.00")
+        entry2 = Mock()
+        entry2.price = Decimal("48000.00")
+        mock_signal.entries = [entry1, entry2]
+        mock_tracking.signal = mock_signal
+        
+        mock_uow.tp_hits.by_tracking.return_value = []
+
+        action = TakeProfitHit(
+            target_number=1,
+            price=Decimal("52000.00"),
+            timestamp=datetime.now(UTC),
+        )
+
+        await processor.process(mock_tracking, [action], mock_uow)
+
+        call_kwargs = mock_uow.tp_hits.create.call_args[1]
+        profit = call_kwargs["profit_percent"]
+        # Average entry = (50000 + 48000) / 2 = 49000
+        # Profit = (52000 - 49000) / 49000 * 100 = 6.12%
+        assert profit == Decimal("6.12")
+
+    @pytest.mark.asyncio
+    async def test_calculates_profit_with_average_entry_both_entries_touched_short(self, processor, mock_tracking, mock_signal, mock_uow):
+        """Test profit calculation uses average entry when both entries are touched (SHORT)."""
+        # Setup: Both entries touched
+        mock_tracking.entry1_touched = True
+        mock_tracking.entry2_touched = True
+        mock_tracking.actual_entry_price = Decimal("48000.00")  # Entry1 price
+        mock_tracking.signal.direction = Direction.SHORT
+        
+        # Signal has two entries
+        from unittest.mock import Mock
+        entry1 = Mock()
+        entry1.price = Decimal("48000.00")
+        entry2 = Mock()
+        entry2.price = Decimal("50000.00")
+        mock_signal.entries = [entry1, entry2]
+        mock_tracking.signal = mock_signal
+        
+        mock_uow.tp_hits.by_tracking.return_value = []
+
+        action = TakeProfitHit(
+            target_number=1,
+            price=Decimal("44000.00"),
+            timestamp=datetime.now(UTC),
+        )
+
+        await processor.process(mock_tracking, [action], mock_uow)
+
+        call_kwargs = mock_uow.tp_hits.create.call_args[1]
+        profit = call_kwargs["profit_percent"]
+        # Average entry = (48000 + 50000) / 2 = 49000
+        # Profit = (49000 - 44000) / 49000 * 100 = 10.20%
+        assert profit == Decimal("10.20")
+
+    @pytest.mark.asyncio
+    async def test_uses_actual_entry_when_only_entry1_touched(self, processor, mock_tracking, mock_signal, mock_uow):
+        """Test profit calculation uses actual_entry_price when only entry1 is touched."""
+        # Setup: Only entry1 touched
+        mock_tracking.entry1_touched = True
+        mock_tracking.entry2_touched = False
+        mock_tracking.actual_entry_price = Decimal("50000.00")
+        mock_tracking.signal.direction = Direction.LONG
+        
+        # Signal has two entries
+        from unittest.mock import Mock
+        entry1 = Mock()
+        entry1.price = Decimal("50000.00")
+        entry2 = Mock()
+        entry2.price = Decimal("48000.00")
+        mock_signal.entries = [entry1, entry2]
+        mock_tracking.signal = mock_signal
+        
+        mock_uow.tp_hits.by_tracking.return_value = []
+
+        action = TakeProfitHit(
+            target_number=1,
+            price=Decimal("52000.00"),
+            timestamp=datetime.now(UTC),
+        )
+
+        await processor.process(mock_tracking, [action], mock_uow)
+
+        call_kwargs = mock_uow.tp_hits.create.call_args[1]
+        profit = call_kwargs["profit_percent"]
+        # Should use actual_entry_price (50000), not average
+        # Profit = (52000 - 50000) / 50000 * 100 = 4.00%
+        assert profit == Decimal("4.00")
+
+    @pytest.mark.asyncio
     async def test_creates_audit_log(self, processor, mock_tracking, mock_uow):
         """Test that TP hit creates audit log."""
         mock_tracking.actual_entry_price = Decimal("48000.00")

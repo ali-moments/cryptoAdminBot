@@ -396,11 +396,12 @@ class ActionProcessor:
         # Log event
         logger.info(f"✓ STOP LOSS HIT: {tracking.signal.symbol} @ {action.price} (tracking_id={tracking.id})")
 
-        # Calculate loss percentage for notification
-        if tracking.actual_entry_price:
+        # Calculate loss percentage for notification using effective entry price (average if both entries touched)
+        effective_entry = self._get_effective_entry_price(tracking)
+        if effective_entry:
             loss_pct = abs(self._calculate_profit_percentage(
                 tracking.signal.direction,
-                tracking.actual_entry_price,
+                effective_entry,
                 action.price,
             ))
             # Apply leverage to the loss percentage for display
@@ -416,11 +417,12 @@ class ActionProcessor:
         uow: UnitOfWork,
     ) -> None:
         """Handle take profit hit."""
-        # Calculate profit percentage
-        if tracking.actual_entry_price:
+        # Calculate profit percentage using effective entry price (average if both entries touched)
+        effective_entry = self._get_effective_entry_price(tracking)
+        if effective_entry:
             profit_pct = self._calculate_profit_percentage(
                 tracking.signal.direction,
-                tracking.actual_entry_price,
+                effective_entry,
                 action.price,
             )
         else:
@@ -448,6 +450,7 @@ class ActionProcessor:
                 "target_number": action.target_number,
                 "price": str(action.price),
                 "profit_percent": str(profit_pct),
+                "effective_entry": str(effective_entry) if effective_entry else None,
                 "timestamp": action.timestamp.isoformat(),
             },
         )
@@ -520,6 +523,30 @@ class ActionProcessor:
         #await self._telegram.send_signal_closed(tracking, "all_targets_hit", uow)
 
         # TODO: Update statistics (win)
+
+    def _get_effective_entry_price(self, tracking: Tracking) -> Decimal | None:
+        """
+        Calculate the effective entry price for profit/loss calculations.
+        
+        If both entry1 and entry2 are touched, returns the average: (entry1 + entry2) / 2
+        Otherwise, returns the actual_entry_price.
+        """
+        if not tracking.actual_entry_price:
+            return None
+            
+        # If both entries are touched, calculate average entry
+        if tracking.entry1_touched and tracking.entry2_touched:
+            signal_entries = tracking.signal.entries
+            if len(signal_entries) >= 2:
+                # Get both entry prices
+                entry1_price = signal_entries[0].price
+                entry2_price = signal_entries[1].price
+                # Return average
+                avg_entry = (entry1_price + entry2_price) / Decimal("2")
+                return avg_entry.quantize(Decimal("0.00000001"))
+        
+        # Otherwise, use the actual entry price
+        return tracking.actual_entry_price
 
     def _calculate_profit_percentage(
         self,
