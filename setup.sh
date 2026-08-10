@@ -40,40 +40,40 @@ check_env_file() {
 # Check if required tools are available
 check_dependencies() {
     log_info "Checking dependencies..."
-    
+
     if ! command -v docker &> /dev/null; then
         log_error "Docker is not installed or not in PATH"
         log_error "Please install Docker first: https://docs.docker.com/get-docker/"
         exit 1
     fi
-    
+
     if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
         log_error "Docker Compose is not available"
         log_error "Please install Docker Compose: https://docs.docker.com/compose/install/"
         exit 1
     fi
-    
+
     log_success "Dependencies check passed"
 }
 
 # Wait for PostgreSQL to be healthy
 wait_for_postgres() {
     log_info "Waiting for PostgreSQL to be healthy..."
-    
+
     local max_attempts=30
     local attempt=1
-    
+
     while [[ $attempt -le $max_attempts ]]; do
         if docker compose ps postgres | grep -q "healthy"; then
             log_success "PostgreSQL is healthy"
             return 0
         fi
-        
+
         log_info "Attempt $attempt/$max_attempts: PostgreSQL not ready yet, waiting..."
         sleep 2
         ((attempt++))
     done
-    
+
     log_error "PostgreSQL failed to become healthy after $max_attempts attempts"
     log_error "Check PostgreSQL logs with: docker compose logs postgres"
     exit 1
@@ -82,7 +82,7 @@ wait_for_postgres() {
 # Run database migrations
 run_migrations() {
     log_info "Running database migrations..."
-    
+
     if docker compose run --rm bot uv run alembic upgrade head; then
         log_success "Database migrations completed successfully"
     else
@@ -94,7 +94,7 @@ run_migrations() {
 # Run database seed
 run_seed() {
     log_info "Running database seed..."
-    
+
     if docker compose run --rm bot uv run scripts/seed.py; then
         log_success "Database seed completed successfully"
     else
@@ -107,7 +107,7 @@ run_seed() {
 run_qr_login() {
     log_info "Starting Telegram QR login process..."
     log_warning "You will need to scan QR codes for both reader and sender sessions"
-    
+
     if docker compose run --rm -it bot uv run scripts/qr_login.py; then
         log_success "Telegram QR login completed successfully"
     else
@@ -119,30 +119,30 @@ run_qr_login() {
 # Fresh installation
 fresh_install() {
     log_info "Starting fresh installation..."
-    
+
     check_env_file
     check_dependencies
-    
+
     log_info "Building and starting PostgreSQL and Adminer..."
     docker compose up -d postgres adminer
-    
+
     wait_for_postgres
-    
+
     run_migrations
     run_seed
-    
+
     # Create sessions directory if it doesn't exist
     mkdir -p sessions
-    
+
     run_qr_login
-    
+
     log_info "Starting the bot..."
     docker compose up -d bot
-    
+
     log_success "Fresh installation completed successfully!"
     log_info "Services status:"
     docker compose ps
-    
+
     log_info ""
     log_success "🎉 Your crypto trading bot is now running!"
     log_info "📊 Adminer (Database UI): http://localhost:8080"
@@ -154,20 +154,20 @@ fresh_install() {
 # Upgrade existing installation
 upgrade() {
     log_info "Starting upgrade process..."
-    
+
     check_env_file
     check_dependencies
-    
+
     log_info "Pulling latest changes from Git..."
     if git pull; then
         log_success "Git pull completed successfully"
     else
         log_warning "Git pull failed or no git repository found. Continuing with existing code..."
     fi
-    
+
     log_info "Rebuilding bot image..."
     docker compose build bot
-    
+
     log_info "Ensuring PostgreSQL is healthy..."
     if ! docker compose ps postgres | grep -q "healthy"; then
         log_info "PostgreSQL not running or not healthy. Starting it..."
@@ -176,16 +176,16 @@ upgrade() {
     else
         log_success "PostgreSQL is already healthy"
     fi
-    
+
     run_migrations
-    
+
     log_info "Restarting bot with new image..."
-    docker compose up -d bot
-    
+    docker compose up -d bot --build
+
     log_success "Upgrade completed successfully!"
     log_info "Services status:"
     docker compose ps
-    
+
     log_info ""
     log_success "🚀 Your crypto trading bot has been upgraded!"
     log_info "📋 Check logs with: docker compose logs -f bot"
@@ -208,7 +208,7 @@ show_usage() {
 main() {
     log_info "Crypto Trading Bot Setup Script"
     log_info "==============================="
-    
+
     if [[ $# -eq 0 ]]; then
         fresh_install
     elif [[ $# -eq 1 ]] && [[ "$1" == "upgrade" ]]; then
