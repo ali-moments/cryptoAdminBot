@@ -81,6 +81,73 @@ class MessageTemplates:
         f'{emojies.TELEGRAM} @Royal_frx'
     )
 
+    PROFIT_SHOT = [
+        (
+            f'<b>شات سودشم بده دیگه{emojies.PROFIT_SHOT1}</b>\n\n'
+            f'<b>{emojies.PROFIT_SHOT2} @Royal_admx</b>'
+        ),
+        (
+            f'<b>حال میکنید نه ؟{emojies.PROFIT_SHOT3}</b>\n\n'
+            f'<b>شما فقط شات سود بدید سیگنالش با ما{emojies.PROFIT_SHOT4}</b>\n\n'
+            f'<b>{emojies.PROFIT_SHOT5} @Royal_admx</b>'
+        ),
+        (
+            f'<b>برکت ، شات سود بدید سیگنال جدید بریم{emojies.PROFIT_SHOT6}</b>\n\n'
+            f'<b>{emojies.PROFIT_SHOT7} @Royal_admx</b>'
+        ),
+        (
+            f'<b>حال میکنید؟{emojies.PROFIT_SHOT8}</b>\n\n'
+            f'<b>شات سود بدید گیفت بگیرید:</b>\n\n'
+            f'<b>{emojies.PROFIT_SHOT9} @Royal_admx</b>'
+        ),
+        (
+            f'<b>سیو سود کنید{emojies.PROFIT_SHOT10}</b>\n\n'
+            f'<b>شات سود بیاد پیوی{emojies.PROFIT_SHOT11}</b>\n\n'
+            f'<b>{emojies.PROFIT_SHOT12} @Royal_admx</b>'
+        ),
+        (
+            f'<b>نفری یه شات سود بفرستید رفقا :</b>\n\n'
+            f'<b>{emojies.PROFIT_SHOT13} @Royal_admx</b>'
+        ),
+        (
+            f'<b>این همه خدمت میکنیم رایگان بهتون احساس وظیفه کنید و نفری یه شات یا یه نظر ارسال کنید به ما انرژی بدید{emojies.PROFIT_SHOT14}</b>\n\n'
+            f'<b>با این کار بهای سیگنال هارو پبردازید حلالتون{emojies.PROFIT_SHOT15}</b>\n\n'
+            f'<b>{emojies.PROFIT_SHOT16} @Royal_admx</b>'
+        ),
+        (
+            f'<b>شات سود بفرستید برا عمو{emojies.PROFIT_SHOT7}</b>\n\n'
+            f'<b>{emojies.PROFIT_SHOT18} @Royal_admx</b>'
+        ),
+        (
+            f'<b>نوش جان همه ، شات سود بفرستید{emojies.PROFIT_SHOT19}</b>\n\n'
+            f'<b>{emojies.PROFIT_SHOT20} @Royal_admx</b>'
+        ),
+        (
+            f'<b>شات سود بدید پیوی عمو انرژی بگیره{emojies.PROFIT_SHOT21}</b>\n\n'
+            f'<b>{emojies.PROFIT_SHOT22} @Royal_admx</b>'
+        ),
+        (
+            f'<b>شات سود نداریم؟ ادامه ندم؟{emojies.PROFIT_SHOT23}</b>\n\n'
+            f'<b>{emojies.PROFIT_SHOT24} @Royal_admx</b>'
+        ),
+        (
+            f'<b>حالا شات سود بفرس و نظرتو درمورد سیگنال های عمو بگو{emojies.PROFIT_SHOT25}</b>\n\n'
+            f'<b>{emojies.PROFIT_SHOT26} @Royal_admx</b>'
+        ),
+        (
+            f'<b>شات سود هارو بفرستید پیوی{emojies.PROFIT_SHOT27}</b>\n\n'
+            f'<b>{emojies.PROFIT_SHOT28} @Royal_admx</b>'
+        ),
+        (
+            f'<b>من سیو سود کردم اینجا ، شما هم سیو کنید و شات سود بفرستید پیوی{emojies.PROFIT_SHOT29}</b>\n\n'
+            f'<b>{emojies.PROFIT_SHOT30} @Royal_admx</b>'
+        ),
+        (
+            f'<b>اگر سوالی داشتید پیوی بگید هستم پاسخ میدم ، شات سود هم ارسال بشه{emojies.PROFIT_SHOT31}</b>\n\n'
+            f'<b>{emojies.PROFIT_SHOT32} @Royal_admx</b>'
+        ),
+    ]
+
     GOOD_NIGHT = (
         f'<b>شبتون بخیر عزیزان{emojies.GN_HEADER}</b>\n\n'
         f'<b>کانال آموزشی{emojies.GN_TEXT}:</b>\n\n'

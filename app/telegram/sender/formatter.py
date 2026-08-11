@@ -91,6 +91,10 @@ class TelegramFormatter:
         else:
             return emojies.PNL_ITEM_OPEN
 
+    def format_profit_shot(self) -> str:
+        text = ''.join(choice(self.templates.PROFIT_SHOT))
+        return text
+
     def format_tp_hit(self, tp_hit: TpHit, created_at, leveraged_profit: Decimal | None = None):
         # Use leveraged profit if provided, otherwise use the database profit_percent
         profit_to_display = leveraged_profit if leveraged_profit is not None else tp_hit.profit_percent

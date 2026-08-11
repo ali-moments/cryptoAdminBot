@@ -6,8 +6,8 @@ from app.telegram.sender.client import TelegramSender
 from app.telegram.sender.formatter import TelegramFormatter
 from app.services.svg import SvgService
 from app.database.uow import UnitOfWork
-from app.database.models import TpHit, Tracking
-from app.database.enums import MessageType
+from app.database.models import Signal, TpHit, Tracking
+from app.database.enums import MessageType, EntryMethod, Direction
 from app.telegram.common.dto import SentMessage, SignalDTO, EntryHitDTO, ProfitShotDTO
 from app.services.settings import States
 
@@ -26,6 +26,15 @@ class TelegramService:
         self._svg = svg
         self.states = states
         self._uow_factory = uow_factory
+        self.profit_shot_counter = 0
+
+    def _check_shot_counter(self) -> bool:
+        if self.profit_shot_counter == 4:
+            self.profit_shot_counter = 0
+            return True
+        else:
+            self.profit_shot_counter += 1
+            return False
 
     def _tehran_now_str(self) -> str:
         return datetime.now(ZoneInfo("Asia/Tehran")).strftime("%Y-%m-%d %H:%M")
@@ -56,6 +65,80 @@ class TelegramService:
             return "0"
 
         return formatted
+
+
+    def _get_effective_entry_price(self, tracking: Tracking) -> Decimal | None:
+        """
+        Calculate the effective entry price for profit/loss calculations.
+
+        If both entry1 and entry2 are touched, returns the average: (entry1 + entry2) / 2
+        If emergency entry and entry1 are both touched, returns average of emergency and entry1
+        Otherwise, returns the actual_entry_price.
+        """
+        if not tracking.actual_entry_price:
+            return None
+
+        signal_entries = tracking.signal.entries
+
+        # If both entries are touched, calculate average entry
+        if tracking.entry1_touched and tracking.entry2_touched:
+            if len(signal_entries) >= 2:
+                # Get both entry prices
+                entry1_price = signal_entries[0].price
+                entry2_price = signal_entries[1].price
+                # Return average
+                avg_entry = (entry1_price + entry2_price) / Decimal("2")
+                return avg_entry.quantize(Decimal("0.00000001"))
+        elif tracking.entry1_touched and tracking.entry_method == EntryMethod.EMERGENCY_ENTRY:
+            # Both emergency and entry1 touched - average them
+            emergency_price = self._calculate_emergency_entry_price_for_audit(tracking.signal)
+            if emergency_price and len(signal_entries) >= 1:
+                entry1_price = signal_entries[0].price
+                # Return average of emergency entry and entry1
+                avg_entry = (emergency_price + entry1_price) / Decimal("2")
+                return avg_entry.quantize(Decimal("0.00000001"))
+
+        # Otherwise, use the actual entry price
+        return tracking.actual_entry_price
+
+    def _calculate_emergency_entry_price_for_audit(
+        self,
+        signal: Signal,
+    ) -> Decimal | None:
+        """
+        Calculate emergency entry price for audit logging purposes.
+
+        This duplicates the logic from EntryRule for diagnostic purposes.
+        The actual business logic uses EntryRule's calculation.
+
+        Formula:
+        - LONG: emergency = EntryHigh + (TP1 - EntryHigh) / 5
+        - SHORT: emergency = EntryLow - (EntryLow - TP1) / 5
+
+        For LONG: EntryHigh is the higher price, emergency is between EntryHigh and TP1
+        For SHORT: EntryLow is the lower price, emergency is between EntryLow and TP1
+        """
+        if not signal.entries or not signal.targets:
+            return None
+
+        sorted_entries = sorted(signal.entries, key=lambda e: e.price)
+        tp1_price = signal.targets[0].price
+        direction = signal.direction
+
+        if direction == Direction.LONG:
+            # LONG: EntryHigh is the higher price
+            entry_high_price = sorted_entries[-1].price
+            distance = tp1_price - entry_high_price
+            fifth_distance = distance / Decimal("5")
+            # Emergency entry is EntryHigh + fifth distance toward TP1
+            return entry_high_price + fifth_distance
+        else:
+            # SHORT: EntryLow is the lower price
+            entry_low_price = sorted_entries[0].price
+            distance = entry_low_price - tp1_price
+            fifth_distance = distance / Decimal("5")
+            # Emergency entry is EntryLow - fifth distance toward TP1
+            return entry_low_price - fifth_distance
 
 
     async def send_signal(self, tracking: Tracking, signal: SignalDTO, uow: UnitOfWork) -> SentMessage | None:
@@ -117,8 +200,9 @@ class TelegramService:
         # signal = tracking.signal
 
         # Format text message
+        avg_entry = self._get_effective_entry_price(tracking=tracking)
         if entry_type == 2:
-            text = self._formatter.format_second_entry_hit(target=target, entry=entry_price)
+            text = self._formatter.format_second_entry_hit(target=target, entry=avg_entry)
         else:
             text = self._formatter.format_first_entry_hit()
 
@@ -184,12 +268,7 @@ class TelegramService:
         caption = self._formatter.format_tp_hit(tp_hit=tp_hit, created_at=tracking.created_at, leveraged_profit=leveraged_profit)
 
         # Calculate effective entry price (average if both entries touched)
-        effective_entry_price = tracking.actual_entry_price
-        if tracking.entry1_touched and tracking.entry2_touched and len(signal.entries) >= 2:
-            from decimal import Decimal
-            entry1_price = signal.entries[0].price
-            entry2_price = signal.entries[1].price
-            effective_entry_price = (entry1_price + entry2_price) / Decimal("2")
+        effective_entry_price = self._get_effective_entry_price(tracking=tracking)
 
         # Generate profit shot image
         profit_dto = ProfitShotDTO(
@@ -239,6 +318,12 @@ class TelegramService:
                 message_id=sent_file.id,
                 reply_to_message_id=reply_to_message_id,
             )
+
+            if self._check_shot_counter():
+                await self._sender.send_message(
+                    channel_id=self.states.target_channel,
+                    message=self._formatter.format_profit_shot(),
+                )
 
         return sent_file
 
