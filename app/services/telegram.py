@@ -147,7 +147,7 @@ class TelegramService:
             reply_to_message_id = signal_message.message_id
 
         # Send file with caption
-        sent_file = await self._sender.send_file(
+        sent_file = await self._sender.send_message(
             channel_id=self.states.target_channel,
             message=text,
             #file_path=file_path,

@@ -523,14 +523,16 @@ class ActionProcessor:
         Calculate the effective entry price for profit/loss calculations.
 
         If both entry1 and entry2 are touched, returns the average: (entry1 + entry2) / 2
+        If emergency entry and entry1 are both touched, returns average of emergency and entry1
         Otherwise, returns the actual_entry_price.
         """
         if not tracking.actual_entry_price:
             return None
 
+        signal_entries = tracking.signal.entries
+        
         # If both entries are touched, calculate average entry
         if tracking.entry1_touched and tracking.entry2_touched:
-            signal_entries = tracking.signal.entries
             if len(signal_entries) >= 2:
                 # Get both entry prices
                 entry1_price = signal_entries[0].price
@@ -538,7 +540,15 @@ class ActionProcessor:
                 # Return average
                 avg_entry = (entry1_price + entry2_price) / Decimal("2")
                 return avg_entry.quantize(Decimal("0.00000001"))
-
+        elif tracking.entry1_touched and tracking.entry_method == EntryMethod.EMERGENCY_ENTRY:
+            # Both emergency and entry1 touched - average them
+            emergency_price = self._calculate_emergency_entry_price_for_audit(tracking.signal)
+            if emergency_price and len(signal_entries) >= 1:
+                entry1_price = signal_entries[0].price
+                # Return average of emergency entry and entry1
+                avg_entry = (emergency_price + entry1_price) / Decimal("2")
+                return avg_entry.quantize(Decimal("0.00000001"))
+        
         # Otherwise, use the actual entry price
         return tracking.actual_entry_price
 
@@ -567,25 +577,30 @@ class ActionProcessor:
         The actual business logic uses EntryRule's calculation.
 
         Formula:
-        - LONG: emergency = tp1 + (tp1 - EntryHigh) / 4
-        - SHORT: emergency = tp1 - (EntryHigh - tp1) / 4
+        - LONG: emergency = EntryHigh + (TP1 - EntryHigh) / 5
+        - SHORT: emergency = EntryLow - (EntryLow - TP1) / 5
 
-        EntryHigh is always the higher absolute price.
+        For LONG: EntryHigh is the higher price, emergency is between EntryHigh and TP1
+        For SHORT: EntryLow is the lower price, emergency is between EntryLow and TP1
         """
         if not signal.entries or not signal.targets:
             return None
 
-        # EntryHigh is always the higher price
         sorted_entries = sorted(signal.entries, key=lambda e: e.price)
-        entry_high_price = sorted_entries[-1].price
-
         tp1_price = signal.targets[0].price
         direction = signal.direction
 
-        distance = abs(tp1_price - entry_high_price)
-        quarter_distance = distance / Decimal("4")
-
         if direction == Direction.LONG:
-            return tp1_price + quarter_distance
+            # LONG: EntryHigh is the higher price
+            entry_high_price = sorted_entries[-1].price
+            distance = tp1_price - entry_high_price
+            fifth_distance = distance / Decimal("5")
+            # Emergency entry is EntryHigh + fifth distance toward TP1
+            return entry_high_price + fifth_distance
         else:
-            return tp1_price - quarter_distance
+            # SHORT: EntryLow is the lower price
+            entry_low_price = sorted_entries[0].price
+            distance = entry_low_price - tp1_price
+            fifth_distance = distance / Decimal("5")
+            # Emergency entry is EntryLow - fifth distance toward TP1
+            return entry_low_price - fifth_distance

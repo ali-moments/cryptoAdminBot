@@ -355,13 +355,17 @@ class Tracking(IDMixin, TimestampMixin, Base):
     def has_entered(self) -> bool:
         """Position has entered (any method).
         
-        Business Rule: Derived from entry flags.
-        - entry1_touched = True for EntryHigh touch, startup past EntryHigh, or Emergency Entry
-        - entry2_touched = True only for physical EntryLow touch
+        Source of truth: actual_entry_price is set when position enters.
         
-        Returns True if either flag is True, meaning position exists.
+        This works for:
+        - New trackings: actual_entry_price set by ActionProcessor when PositionEntered is processed
+        - Recovered trackings: actual_entry_price loaded from database ensures correct state
+        - WAITING_ENTRY trackings: actual_entry_price is None, returns False correctly
+        
+        The touch flags (entry1_touched, entry2_touched) are for idempotency checks,
+        not for determining entry state.
         """
-        return self.entry1_touched or self.entry2_touched
+        return self.actual_entry_price is not None
 
     tp_hits: Mapped[list["TpHit"]] = relationship(
         back_populates="tracking",
