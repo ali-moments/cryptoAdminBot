@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 import math
 from decimal import Decimal
 from typing import TYPE_CHECKING
+import asyncio
 from loguru import logger
 from app.core.dto import ValidatedSignal
 from app.database.enums import AuditEventType, Direction, SignalStatus, Provider, TrackingStatus
@@ -26,30 +27,70 @@ class SignalLifecycleService:
     def __init__(self, states: States, telegram_service: "TelegramService | None" = None) -> None:
         self.states = states
         self._telegram_service = telegram_service
+        # In-memory cache to prevent duplicate Telegram messages from creating duplicate signals
+        # Cache: key=(symbol, direction, first_entry, first_target) -> timestamp
+        self._recent_signals: dict[tuple[str, Direction, Decimal, Decimal], datetime] = {}
+        self._cache_lock = asyncio.Lock()
+        self._cache_ttl_seconds = 15  # Keep entries for 10 seconds
+
+    def _get_signal_cache_key(self, signal: ValidatedSignal) -> tuple[str, Direction, Decimal, Decimal]:
+        """Create a cache key from signal characteristics."""
+        first_entry = signal.entries[0].price if signal.entries else Decimal(0)
+        first_target = signal.targets[0].price if signal.targets else Decimal(0)
+        return (signal.symbol, signal.direction, first_entry, first_target)
+
+    async def _is_recently_processed(self, signal: ValidatedSignal) -> bool:
+        """
+        Check if this signal was recently processed (within cache TTL).
+        This prevents duplicate Telegram messages from creating duplicate signals.
+        """
+        async with self._cache_lock:
+            # Clean up old entries
+            now = datetime.now(UTC)
+            expired_keys = [
+                key for key, timestamp in self._recent_signals.items()
+                if (now - timestamp).total_seconds() > self._cache_ttl_seconds
+            ]
+            for key in expired_keys:
+                del self._recent_signals[key]
+
+            # Check if signal was recently processed
+            cache_key = self._get_signal_cache_key(signal)
+            if cache_key in self._recent_signals:
+                time_since = (now - self._recent_signals[cache_key]).total_seconds()
+                logger.info(
+                    f"Signal {signal.symbol} {signal.direction.value} ignored: "
+                    f"already processed {time_since:.1f}s ago (likely duplicate Telegram message)"
+                )
+                return True
+
+            # Mark as processed
+            self._recent_signals[cache_key] = now
+            return False
 
     @staticmethod
     def _is_in_quiet_hours() -> bool:
         """
         Check if current time falls in the quiet hours (22:00 to 5:20 Asia/Tehran).
         Signals received during this period should be ignored.
-        
+
         Returns True if in quiet hours, False otherwise.
         """
         tehran_tz = ZoneInfo("Asia/Tehran")
         current_time = datetime.now(tehran_tz)
         current_hour = current_time.hour
         current_minute = current_time.minute
-        
+
         # 22:00 to 23:59 (same day)
         if current_hour >= 22:
             return True
-        
+
         # 00:00 to 5:20 (next day)
         if current_hour < 5:
             return True
         if current_hour == 5 and current_minute <= 20:
             return True
-        
+
         return False
 
     @staticmethod
@@ -196,6 +237,11 @@ class SignalLifecycleService:
         source: SignalSource,
         uow: UnitOfWork,
     ) -> Signal|None:
+        # Check in-memory cache first (before any database operations)
+        # This prevents duplicate Telegram messages from creating duplicate signals
+        if await self._is_recently_processed(signal):
+            return None
+
         # Check if we're in quiet hours (22:00 to 5:20 Asia/Tehran)
         if self._is_in_quiet_hours():
             logger.info(
@@ -219,7 +265,7 @@ class SignalLifecycleService:
             )
             await uow.commit()
             return None
-        
+
         duplicate = await self._find_duplicate(
             signal=signal,
             uow=uow,
