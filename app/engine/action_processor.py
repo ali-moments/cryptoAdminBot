@@ -96,21 +96,15 @@ class ActionProcessor:
         """Check if action was already processed using existing state."""
         match action:
             case PositionEntered():
-                # Check based on entry type
                 if action.entry_type == EntryType.ENTRY_1:
-                    # Special case: After emergency entry, check audit log to prevent duplicates
-                    # Normal case uses entry_method to determine if already processed
-                    if tracking.entry_method == EntryMethod.EMERGENCY_ENTRY:
-                        # Query audit log to see if ENTRY1_HIT was already recorded
-                        logs = await uow.audit_logs.by_tracking(tracking.id)
-                        return any(log.event == AuditEventType.ENTRY1_HIT for log in logs)
-                    else:
-                        # Normal flow: ENTRY_1 is processed if entry1_touched and method is ENTRY_1
-                        return tracking.entry1_touched and tracking.entry_method == EntryMethod.ENTRY_1
-                elif action.entry_type == EntryType.ENTRY_2:
+                    return tracking.entry1_touched
+
+                if action.entry_type == EntryType.ENTRY_2:
                     return tracking.entry2_touched
-                elif action.entry_type == EntryType.EMERGENCY_ENTRY:
+
+                if action.entry_type == EntryType.EMERGENCY_ENTRY:
                     return tracking.entry_method == EntryMethod.EMERGENCY_ENTRY
+
                 return False
 
             case TakeProfitHit():
