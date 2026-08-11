@@ -59,8 +59,9 @@ class MessageTemplates:
 
     ENTRY_HIT = (
         f'<b>ورود دوم فعال شد{emojies.ENTRY_HIT1}</b>\n\n'
-        f'تارگت جدید{emojies.ENTRY_HIT2}: '+'{target}\n\n'
-        f'{emojies.TELEGRAM} @Royal_frx'
+        f'<b>میانگین{emojies.ENTRY_HIT2}: '+'{entry}</b>\n'
+        f'<b>تارگت جدید{emojies.ENTRY_HIT3}: '+'{target}</b>\n\n'
+        f'{emojies.TELEGRAM} @Royal_frx | رویال'
     )
 
     SL_HIT = (

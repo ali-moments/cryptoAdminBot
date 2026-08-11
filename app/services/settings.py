@@ -7,7 +7,7 @@ class States:
         self.emergency_entry_timeout = 3
         self.signal_entry_timeout = 2
         self.signal_expiry_timeout = 72
-        self.active_signals_limit = 7
+        self.active_signals_limit = 5
 
     def set_dev_mode(self) -> bool:
         self.dev_mode = not self.dev_mode

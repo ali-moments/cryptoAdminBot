@@ -109,8 +109,11 @@ class TelegramFormatter:
     def format_first_entry_hit(self):
         return "first entry hit"
 
-    def format_second_entry_hit(self, target) -> str:
-        text = ''.join(self.templates.ENTRY_HIT.format(target=self._normalize_number(target)))
+    def format_second_entry_hit(self, target, entry) -> str:
+        text = ''.join(self.templates.ENTRY_HIT.format(
+            target=self._normalize_number(target),
+            entry=self._normalize_number(entry)
+        ))
         return text
 
     def format_sl_hit(self, loss: str):

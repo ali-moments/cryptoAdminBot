@@ -1,5 +1,6 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from decimal import Decimal
 
 from app.telegram.sender.client import TelegramSender
 from app.telegram.sender.formatter import TelegramFormatter
@@ -28,6 +29,33 @@ class TelegramService:
 
     def _tehran_now_str(self) -> str:
         return datetime.now(ZoneInfo("Asia/Tehran")).strftime("%Y-%m-%d %H:%M")
+
+    def _normalize_number(self, value: Decimal | float | str) -> str:
+        """
+        Normalize number by removing unnecessary trailing zeros.
+        Examples:
+        23.63640000000 -> 23.6364
+        10.00 -> 10
+        0.50 -> 0.5
+        """
+        if isinstance(value, str):
+            try:
+                value = Decimal(value)
+            except:
+                return value
+
+        # Convert to Decimal if it's a float
+        if isinstance(value, float):
+            value = Decimal(str(value))
+
+        # Format as string and remove trailing zeros
+        formatted = f"{value:.10f}".rstrip('0').rstrip('.')
+
+        # Handle edge case where we might end up with empty string
+        if not formatted or formatted == '-':
+            return "0"
+
+        return formatted
 
 
     async def send_signal(self, tracking: Tracking, signal: SignalDTO, uow: UnitOfWork) -> SentMessage | None:
@@ -86,31 +114,31 @@ class TelegramService:
 
     async def send_entry_hit(self, tracking: Tracking, entry_type: int, entry_price: str, uow: UnitOfWork, target) -> SentMessage | None:
         """Send entry hit notification with image"""
-        signal = tracking.signal
+        # signal = tracking.signal
 
         # Format text message
         if entry_type == 2:
-            text = self._formatter.format_second_entry_hit(target=target)
+            text = self._formatter.format_second_entry_hit(target=target, entry=entry_price)
         else:
             text = self._formatter.format_first_entry_hit()
 
-        # Generate entry shot image
-        entry_dto = EntryHitDTO(
-            symbol=signal.symbol,
-            direction=signal.direction.value,
-            leverage=signal.leverage,
-            entry_price=entry_price,
-            entry_type=entry_type,
-            datetime_str=self._tehran_now_str()
-        )
+        # # Generate entry shot image
+        # entry_dto = EntryHitDTO(
+        #     symbol=signal.symbol,
+        #     direction=signal.direction.value,
+        #     leverage=signal.leverage,
+        #     entry_price=entry_price,
+        #     entry_type=entry_type,
+        #     datetime_str=self._tehran_now_str()
+        # )
 
-        file_path = self._svg.generate_entry_shot(
-            pair=entry_dto.symbol,
-            direction=entry_dto.direction,
-            leverage=entry_dto.leverage,
-            entry=entry_dto.entry_price,
-            datetime_str=entry_dto.datetime_str,
-        )
+        # file_path = self._svg.generate_entry_shot(
+        #     pair=entry_dto.symbol,
+        #     direction=entry_dto.direction,
+        #     leverage=entry_dto.leverage,
+        #     entry=self._normalize_number(entry_dto.entry_price),
+        #     datetime_str=entry_dto.datetime_str,
+        # )
 
         # Get original signal message for reply-to
         reply_to_message_id = None
@@ -122,12 +150,12 @@ class TelegramService:
         sent_file = await self._sender.send_file(
             channel_id=self.states.target_channel,
             message=text,
-            file_path=file_path,
+            #file_path=file_path,
             reply_to=reply_to_message_id,
         )
 
-        # Clean up generated file
-        self._svg.clear_shot_file(file_path)
+        # # Clean up generated file
+        # self._svg.clear_shot_file(file_path)
 
         # Store message in database
         if sent_file:
@@ -179,8 +207,8 @@ class TelegramService:
             direction=profit_dto.direction,
             leverage=profit_dto.leverage,
             pnl=profit_dto.pnl,
-            entry=profit_dto.entry_price,
-            exit_price=profit_dto.exit_price,
+            entry=self._normalize_number(profit_dto.entry_price),
+            exit_price=self._normalize_number(profit_dto.exit_price),
             datetime_str=profit_dto.datetime_str,
         )
 

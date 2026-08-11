@@ -2,7 +2,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from app.database.enums import Direction, EntryMethod
-from app.database.models import Tracking, SignalEntry, SignalTarget
+from app.database.models import Tracking, SignalEntry
 from app.market.dto import PriceTick
 from app.engine.actions import PositionEntered, WaitingEntryExpired, EntryType
 from app.config.settings import settings
@@ -63,7 +63,7 @@ class EntryRule:
         # Check both entry1 and entry2 (entry1 may still be valid after emergency entry)
         # ============================================================
         actions = []
-        
+
         # Check entry1 if entered via emergency entry
         # After emergency entry, entry1 price may still be touched
         if tracking.entry_method == EntryMethod.EMERGENCY_ENTRY and first_entry:
@@ -75,7 +75,7 @@ class EntryRule:
                         timestamp=current_time,
                     )
                 )
-        
+
         # Check entry2 (existing logic)
         entry2_actions = await self._handle_entry2(
             tracking=tracking,
@@ -84,7 +84,7 @@ class EntryRule:
             second_entry=second_entry,
         )
         actions.extend(entry2_actions)
-        
+
         return actions
 
     async def _handle_waiting_entry(
@@ -278,8 +278,8 @@ class EntryRule:
         Calculate emergency entry price.
 
         Formula:
-        - LONG: emergency_entry = EntryHigh + (TP1 - EntryHigh) / 4
-        - SHORT: emergency_entry = EntryLow - (EntryLow - TP1) / 4
+        - LONG: emergency_entry = EntryHigh + (TP1 - EntryHigh) / 5
+        - SHORT: emergency_entry = EntryLow - (EntryLow - TP1) / 5
 
         For LONG: EntryHigh is the higher price, emergency is between EntryHigh and TP1
         For SHORT: EntryLow is the lower price, emergency is between EntryLow and TP1
@@ -295,14 +295,14 @@ class EntryRule:
             # LONG: EntryHigh is the higher price
             entry_high_price = sorted_entries[-1].price
             distance = tp1_price - entry_high_price
-            quarter_distance = distance / Decimal("4")
+            quarter_distance = distance / Decimal("5")
             # Emergency entry is EntryHigh + quarter distance toward TP1
             return entry_high_price + quarter_distance
         else:
             # SHORT: EntryLow is the lower price
             entry_low_price = sorted_entries[0].price
             distance = entry_low_price - tp1_price
-            quarter_distance = distance / Decimal("4")
+            quarter_distance = distance / Decimal("5")
             # Emergency entry is EntryLow - quarter distance toward TP1
             return entry_low_price - quarter_distance
 
