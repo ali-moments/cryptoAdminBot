@@ -153,7 +153,9 @@ class TelegramFormatter:
         pnl_items = []
         for item in stats.items:
             pnl_items.append(self.templates.PNL_ITEM.format(
+                symbol_url = "",
                 symbol=item.symbol,
+                status_url = "",
                 status=item.status,
                 pnl=self._normalize_number(item.pnl),
                 emoji=self._get_pnl_emoji(item.status)

@@ -37,13 +37,15 @@ class SignalDTO:
 class PNLItem:
     """
     status:
-        - TP{number} 
-            eg: TP1, TP2, ... 
+        - TP{number}
+            eg: TP1, TP2, ...
         - OPEN
         - STOP
     """
     symbol: str
-    status: str 
+    signal_msg_id: int
+    status: str
+    status_msg_id: int | None
     pnl: Decimal
 
 

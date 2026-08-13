@@ -193,13 +193,14 @@ class SignalLifecycleService:
         """
         Check if we should cancel the new signal due to capacity limit.
 
-        Returns True if there are already {number} or more active trackings without any TP hits.
+        Returns True if there are already {number} or more active trackings without any TP hits
+        created on the same UTC calendar day.
         """
-        count = await uow.trackings.count_active_without_tp_hits()
+        count = await uow.trackings.count_active_without_tp_hits_on_date(datetime.now(UTC))
 
         if count >= self.states.active_signals_limit:
             logger.info(
-                f"Signal will be cancelled: {count} active trackings exist without TP hits (limit: {self.states.active_signals_limit})"
+                f"Signal will be cancelled: {count} active trackings created today (UTC) without TP hits (limit: {self.states.active_signals_limit})"
             )
             return True
 
