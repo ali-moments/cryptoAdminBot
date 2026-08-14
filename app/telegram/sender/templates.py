@@ -5,13 +5,18 @@ class MessageTemplates:
         pass
 
     SIGNAL = (
-        f'<b>{emojies.PAIR} '+'{symbol} | {direction} {direction_arrow}</b>\n\n'
-        f'<b>ورودی{emojies.ENTRY}'+': {entry_text}</b>\n'
-        f'<b>حد سود{emojies.TARGETS}'+': {target_lines}</b>\n'
-        f'<b>استاپ{emojies.STOP_LOSS}'+': {stop_loss}</b>\n'
-        f'<b>لوریج{emojies.LEVERAGE}'+': {leverage}X</b>\n\n'
-        f'{emojies.SIGNAL_TEXT}به لوریج داده شده دقت کنید مقدار ورودی برای هر سیگنال ۲٪ سرمایه هست.\n\n'
-        f'<blockquote>{emojies.ROYAL}'+' <b>@Royal_frx</b></blockquote>'
+        #f'{emojies.PAIR}'+'<b>{symbol} | {direction} {direction_arrow}</b>\n\n'
+        f'{emojies.PAIR}'+'<b>{symbol} | {direction_arrow}</b>\n\n'
+        '<blockquote><b>ENTRY | ورودی</b></blockquote>\n'
+        f'{emojies.ENTRY}: '+'{entry_text}\n'
+        '<blockquote><b>TARGET | حد سود</b></blockquote>\n'
+        f'{emojies.TARGETS}: '+'{target_lines}\n'
+        '<blockquote><b>STOP | حد ضرر</b></blockquote>\n'
+        f'{emojies.STOP_LOSS}: '+'{stop_loss}\n'
+        '<blockquote><b>LV | لوریج</b></blockquote>\n'
+        f'{emojies.LEVERAGE}: '+'{leverage}X\n\n'
+        f'{emojies.SIGNAL_TEXT}به لوریج داده شده دقت کنید مقدار ورودی برای هر سیگنال ۲٪ سرمایه هست.\n'
+        f'<blockquote>{emojies.TELEGRAM2}'+' <b>@Royal_frx</b></blockquote>'
     )
 
     TP_HIT = (
