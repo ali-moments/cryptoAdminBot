@@ -41,6 +41,13 @@ class PNLItem:
             eg: TP1, TP2, ...
         - OPEN
         - STOP
+    status_msg_id:
+        - TP{number}: TP{number}'s telegram message id
+        - STOP: STOP's telegram message id
+        - OPEN: None
+    pnl:
+        pnl percentage, for 'open' status it should get and calculate that
+        moment's profit or loss using market data(REST)
     """
     symbol: str
     signal_msg_id: int
