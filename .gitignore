@@ -32,6 +32,8 @@ todo.txt
 # profit and entry shots firectory
 generated/*
 
-
 #temp
 PNL1.svg
+
+#app backup
+app_backup/*

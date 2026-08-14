@@ -8,7 +8,7 @@ from app.services.svg import SvgService
 from app.database.uow import UnitOfWork
 from app.database.models import Signal, TpHit, Tracking
 from app.database.enums import MessageType, EntryMethod, Direction
-from app.telegram.common.dto import SentMessage, SignalDTO, EntryHitDTO, ProfitShotDTO
+from app.telegram.common.dto import PnlDTO, SentMessage, SignalDTO, EntryHitDTO, ProfitShotDTO
 from app.services.settings import States
 
 
@@ -392,9 +392,10 @@ class TelegramService:
 
         return sent_message
 
-    async def send_pnl(self):
-        # do not change this, i will fix that later
-        pass
+    async def send_pnl(self, pnldto: PnlDTO, uow: UnitOfWork):
+        """
+        format and send telegram pnl message
+        """
 
 
     async def send_good_morning(self) -> SentMessage | None:
