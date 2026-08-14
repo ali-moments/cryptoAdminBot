@@ -70,20 +70,19 @@ class MessageTemplates:
     )
 
     SL_HIT = (
-        f'<b>استاپ تاچ شد{emojies.SL_HEADER}</b>\n\n'
-        f'<b>ضرر{emojies.SL_PERCENTAGE}: '+'-{loss}%</b>\n\n'
-        f'<b>جبران میشه عزیزان{emojies.SL_FOOTER1}{emojies.SL_FOOTER2}</b>\n'
+        '<b>STOP — -{loss}%</b>'+f'{emojies.SL_HEADER}\n\n'
+        f'<b>استاپ تاچ شد عزیزان جبران میشه{emojies.SL_FOOTER1}</b>\n'
     )
 
-    PNL_HEADER = f"<b>{emojies.PNL_HEADER1}برآیند امروز تیم رویال{emojies.PNL_HEADER2}</b>\n\n"
+    PNL_HEADER = f"{emojies.PNL_HEADER1}<b>برآیند امروز تیم رویال</b>{emojies.ROYAL}\n\n"
 
-    PNL_ITEM = "<b><a href=\"{symbol_url}\">{symbol}</a> <a href=\"{status_url}\">{status}</a> — {pnl} {emoji}</b>\n"
+    PNL_ITEM = "{emoji1}<b><a href=\"{symbol_url}\">{symbol}</a> <a href=\"{status_url}\">{status}</a> — {pnl}</b>{emoji2}\n"
 
     PNL_FOOTER = (
         f'{emojies.PNL_SPACER_FULL}\n\n'
         f'<b>{emojies.PNL_WINRATE} Win Rate: '+'{pnl}</b>\n\n'
         f'{emojies.PNL_SPACER_FULL}\n'
-        f'{emojies.TELEGRAM} @Royal_frx'
+        f'{emojies.TELEGRAM} <b>@Royal_frx</b>'
     )
 
     PROFIT_SHOT = [

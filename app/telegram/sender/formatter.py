@@ -85,11 +85,14 @@ class TelegramFormatter:
 
     def _get_pnl_emoji(self, status: str) -> str:
         if status.startswith('TP'):
-            return emojies.PNL_ITEM_TARGET
+            return emojies.PNL_ITEM_TARGET1, emojies.PNL_ITEM_TARGET2
         if status == 'STOP':
-            return emojies.PNL_ITEM_LOSS
+            return emojies.PNL_ITEM_LOSS1, emojies.PNL_ITEM_LOSS2
         else:
-            return emojies.PNL_ITEM_OPEN
+            return emojies.PNL_ITEM_OPEN1, emojies.PNL_ITEM_OPEN2
+
+    def _generate_msg_url(self, status_msg_id, channel_id) -> str:
+        return f"https://t.me/c/{str(channel_id)[4:]}/{status_msg_id}"
 
     def format_profit_shot(self) -> str:
         text = ''.join(choice(self.templates.PROFIT_SHOT))
@@ -147,18 +150,21 @@ class TelegramFormatter:
         ))
         return test
 
-    def format_pnl(self, stats:PnlDTO):
+    def format_pnl(self, stats:PnlDTO, channel_id):
         header = self.templates.PNL_HEADER
 
         pnl_items = []
         for item in stats.items:
+            emoji1, emoji2 = self._get_pnl_emoji(item.status)
+            status_msg_id = item.status_msg_id if item.status_msg_id else item.signal_msg_id
             pnl_items.append(self.templates.PNL_ITEM.format(
-                symbol_url = "",
+                emoji1=emoji1,
+                symbol_url = self._generate_msg_url(item.signal_msg_id, channel_id),
                 symbol=item.symbol,
-                status_url = "",
+                status_url = self._generate_msg_url(status_msg_id, channel_id),
                 status=item.status,
                 pnl=self._normalize_number(item.pnl),
-                emoji=self._get_pnl_emoji(item.status)
+                emoji2=emoji2,
             ))
 
         content = '\n'.join(pnl_items)
