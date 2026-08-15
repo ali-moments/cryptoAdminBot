@@ -40,6 +40,10 @@ async def main() -> None:
 
     await app.scheduler.start()
 
+    logger.info("Starting admin bot...")
+
+    await app.admin_bot.start()
+
     logger.info("starting Telegram sender module...")
 
     # Start the sender as a background task since it also runs indefinitely  
@@ -79,6 +83,12 @@ async def main() -> None:
     logger.info("Shutting down application...")
 
     # Shutdown in reverse order
+    try:
+        logger.info("Stopping admin bot...")
+        await app.admin_bot.stop()
+    except Exception as e:
+        logger.error(f"Error stopping admin bot: {e}")
+
     try:
         logger.info("Stopping Telegram sender...")
         # First disconnect the sender client gracefully

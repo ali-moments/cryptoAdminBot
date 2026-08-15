@@ -1,14 +1,14 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from decimal import Decimal
-
+from loguru import logger
 from app.telegram.sender.client import TelegramSender
 from app.telegram.sender.formatter import TelegramFormatter
 from app.services.svg import SvgService
 from app.database.uow import UnitOfWork
 from app.database.models import Signal, TpHit, Tracking
 from app.database.enums import MessageType, EntryMethod, Direction
-from app.telegram.common.dto import PnlDTO, SentMessage, SignalDTO, EntryHitDTO, ProfitShotDTO
+from app.telegram.common.dto import PnlDTO, SentMessage, SignalDTO, ProfitShotDTO
 from app.services.settings import States
 
 
@@ -50,7 +50,7 @@ class TelegramService:
         if isinstance(value, str):
             try:
                 value = Decimal(value)
-            except:
+            except Exception:
                 return value
 
         # Convert to Decimal if it's a float
@@ -145,6 +145,10 @@ class TelegramService:
         """
         Sends signal data to channel.
         """
+        if not self.states.bot_enabled:
+            logger.trace("Bot disabled, skipping signal send")
+            return None
+
         text = self._formatter.format_signal(signal)
         sent_message = await self._sender.send_message(
             channel_id=self.states.target_channel,
@@ -167,6 +171,10 @@ class TelegramService:
 
     async def send_sl_hit(self, tracking: Tracking, loss_percent: str, uow: UnitOfWork) -> SentMessage | None:
         """Send stop loss hit notification"""
+        if not self.states.bot_enabled:
+            logger.trace("Bot disabled, skipping SL hit send")
+            return None
+
         text = self._formatter.format_sl_hit(loss=loss_percent)
 
         # Get original signal message for reply-to
@@ -197,6 +205,10 @@ class TelegramService:
 
     async def send_entry_hit(self, tracking: Tracking, entry_type: int, entry_price: str, uow: UnitOfWork, target) -> SentMessage | None:
         """Send entry hit notification with image"""
+        if not self.states.bot_enabled:
+            logger.trace("Bot disabled, skipping entry hit send")
+            return None
+
         # signal = tracking.signal
 
         # Format text message
@@ -260,6 +272,10 @@ class TelegramService:
         """
         Sends TP hit image with caption.
         """
+        if not self.states.bot_enabled:
+            logger.trace("Bot disabled, skipping TP hit send")
+            return None
+
         signal = tracking.signal
 
         # Calculate leveraged profit percentage for display
@@ -330,6 +346,10 @@ class TelegramService:
 
     async def send_signal_cancelled(self, tracking: Tracking, reason: str, uow: UnitOfWork) -> SentMessage | None:
         """Send signal cancelled notification"""
+        if not self.states.bot_enabled:
+            logger.trace("Bot disabled, skipping signal cancelled send")
+            return None
+
         text = f"سیگنال {tracking.signal.symbol} لغو شد\nدلیل: {reason}"
 
         # Get original signal message for reply-to
@@ -359,6 +379,10 @@ class TelegramService:
 
     async def send_signal_closed(self, tracking: Tracking, reason: str, uow: UnitOfWork) -> SentMessage | None:
         """Send signal closed notification for various reasons"""
+        if not self.states.bot_enabled:
+            logger.trace("Bot disabled, skipping signal closed send")
+            return None
+
         reason_text = {
             "risk_free": "ریسک فری",
             "all_targets_hit": "تمام اهداف",
@@ -396,6 +420,10 @@ class TelegramService:
         """
         format and send telegram pnl message
         """
+        if not self.states.bot_enabled:
+            logger.trace("Bot disabled, skipping PnL send")
+            return None
+
         reply_to = None
         top_tp = 0
         for item in pnldto.items:
@@ -417,6 +445,10 @@ class TelegramService:
 
 
     async def send_good_morning(self) -> SentMessage | None:
+        if not self.states.bot_enabled:
+            logger.trace("Bot disabled, skipping good morning send")
+            return None
+
         text = self._formatter.format_good_morning()
         sent_message = await self._sender.send_message(
             channel_id=self.states.target_channel,
@@ -426,6 +458,10 @@ class TelegramService:
 
 
     async def send_good_night(self) -> SentMessage | None:
+        if not self.states.bot_enabled:
+            logger.trace("Bot disabled, skipping good night send")
+            return None
+
         text = self._formatter.format_good_night()
         sent_message = await self._sender.send_message(
             channel_id=self.states.target_channel,

@@ -6,6 +6,7 @@ from app.services.validation import ValidationService
 from app.telegram.parsers.manager import ParserManager
 from app.telegram.reader.events import TelegramMessageReceived
 from app.config.settings import settings
+from app.services.settings import States
 
 
 class MessageProcessor:
@@ -15,14 +16,21 @@ class MessageProcessor:
         parser_manager: ParserManager,
         validation_service: ValidationService,
         signal_lifecycle: SignalLifecycleService,
+        states: States,
     ) -> None:
         self._uow_factory = uow_factory
         self._parser_manager = parser_manager
         self._validation_service = validation_service
         self._signal_lifecycle = signal_lifecycle
+        self._states = states
 
     async def handle(self, event: TelegramMessageReceived) -> None:
         try:
+            # Check if bot is globally enabled
+            if not self._states.bot_enabled:
+                logger.trace("Bot disabled, ignoring message")
+                return
+
             channel_id = event.message.channel_id
             if event.message.is_forwarded and event.message.sender_id in settings.admins:
                 channel_id = event.message.forwarded_chat_id

@@ -38,6 +38,9 @@ from app.engine.action_processor import ActionProcessor
 from app.market.subscription_manager import SubscriptionManager
 from app.scheduler import AppScheduler
 from app.analytics.pnl import PnlAnalytics
+from app.services.statistics import StatisticsService
+from app.services.admin import AdminService
+from app.telegram.admin.bot import AdminBot
 
 
 @dataclass(slots=True)
@@ -67,6 +70,10 @@ class Application:
     subscription_manager: SubscriptionManager
 
     scheduler: AppScheduler
+
+    admin_service: AdminService
+
+    admin_bot: AdminBot
 
 
 
@@ -131,7 +138,7 @@ def build_application() -> Application:
 
     # Engine components
     tracker = Tracker()
-    
+
     # TelegramService already created above
     action_processor = ActionProcessor(telegram_service)
 
@@ -157,6 +164,7 @@ def build_application() -> Application:
         parser_manager=parser_manager,
         validation_service=validation,
         signal_lifecycle=lifecycle,
+        states=states,
     )
     reader_manager = ReaderManager()
     reader_manager.subscribe(processor.handle)
@@ -168,6 +176,20 @@ def build_application() -> Application:
 
     # Create scheduler with telegram service and analytics
     scheduler = AppScheduler(telegram_service, pnl_analytics)
+
+    # Create statistics service for admin bot
+    statistics_service = StatisticsService(UnitOfWork())
+
+    # Create admin service
+    admin_service = AdminService(
+        uow_factory=UnitOfWork,
+        statistics_service=statistics_service,
+        action_processor=action_processor,
+        states=states,
+    )
+
+    # Create admin bot
+    admin_bot = AdminBot(admin_service)
 
     return Application(
         registry=registry,
@@ -183,4 +205,6 @@ def build_application() -> Application:
         tracking_manager=tracking_manager,
         subscription_manager=subscription_manager,
         scheduler=scheduler,
+        admin_service=admin_service,
+        admin_bot=admin_bot,
     )
