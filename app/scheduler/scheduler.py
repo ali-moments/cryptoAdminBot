@@ -54,11 +54,12 @@ async def calculate_24h_pnl_job() -> None:
     if _pnl_analytics is None:
         logger.error("PNL analytics not available for 24h PNL job")
         return
-    
+
     try:
         logger.info("Calculating 24-hour PNL...")
         pnl = await _pnl_analytics.get_24h_pnl()
         logger.success(f"24h PNL calculated: {len(pnl.items)} items, total: {pnl.total:.2f}%")
+        await _telegram_service.send_pnl(pnldto=pnl)
     except Exception as e:
         logger.error(f"Failed to calculate 24h PNL: {e}")
         # Don't re-raise - scheduler should continue running
@@ -69,11 +70,12 @@ async def calculate_weekly_pnl_job() -> None:
     if _pnl_analytics is None:
         logger.error("PNL analytics not available for weekly PNL job")
         return
-    
+
     try:
         logger.info("Calculating weekly PNL...")
         pnl = await _pnl_analytics.get_weekly_pnl()
         logger.success(f"Weekly PNL calculated: {len(pnl.items)} items, total: {pnl.total:.2f}%")
+        await _telegram_service.send_pnl(pnldto=pnl)
     except Exception as e:
         logger.error(f"Failed to calculate weekly PNL: {e}")
         # Don't re-raise - scheduler should continue running
@@ -201,25 +203,27 @@ class AppScheduler:
             name='Daily Good Night Message'
         )
 
-        # 24-hour PNL job - every hour at minute 0
+        # 24-hour PNL job - every day at 21:50
         self._scheduler.add_job(
             func=calculate_24h_pnl_job,
             trigger='cron',
-            minute=0,
-            id='hourly_24h_pnl',
+            hour=21,
+            minute=50,
+            id='daily_24h_pnl',
             replace_existing=True,
-            name='Hourly 24h PNL Calculation'
+            name='Daily 24h PNL Calculation'
         )
 
-        # Weekly PNL job - every 6 hours at minute 0
+        # Weekly PNL job — Fridays at 21:55 only
         self._scheduler.add_job(
             func=calculate_weekly_pnl_job,
             trigger='cron',
-            hour='0,6,12,18',
-            minute=0,
+            day_of_week='friday',
+            hour=21,
+            minute=55,
             id='periodic_weekly_pnl',
             replace_existing=True,
-            name='Periodic Weekly PNL Calculation'
+            name='Weekly PNL Calculation(Fridays only)'
         )
 
         logger.info("Scheduled jobs registered successfully")

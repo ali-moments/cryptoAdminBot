@@ -392,10 +392,28 @@ class TelegramService:
 
         return sent_message
 
-    async def send_pnl(self, pnldto: PnlDTO, uow: UnitOfWork):
+    async def send_pnl(self, pnldto: PnlDTO):
         """
         format and send telegram pnl message
         """
+        reply_to = None
+        top_tp = 0
+        for item in pnldto.items:
+            if item.status.startswith('TP'):
+                try:
+                    if int(item.status.replace('TP', '')) > top_tp:
+                        top_tp = int(item.status.replace('TP', ''))
+                        reply_to = item.status_msg_id
+                except Exception:
+                    continue
+
+        text = self._formatter.format_pnl(pnldto, self.states.target_channel)
+        sent_message = await self._sender.send_message(
+            channel_id=self.states.target_channel,
+            message=text,
+            reply_to=reply_to,
+        )
+        return sent_message
 
 
     async def send_good_morning(self) -> SentMessage | None:
