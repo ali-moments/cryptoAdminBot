@@ -29,4 +29,4 @@ RUN uv sync --frozen --no-dev
 
 RUN mkdir -p sessions generated logs
 
-CMD ["uv", "run", "app/main.py"]
+CMD ["uv", "run", "--frozen", "--no-dev", "python", "-m", "app.main"]
