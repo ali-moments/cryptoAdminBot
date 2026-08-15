@@ -386,7 +386,8 @@ class TelegramService:
         reason_text = {
             "risk_free": "ریسک فری",
             "all_targets_hit": "تمام اهداف",
-            "expired": "منقضی شده"
+            "expired": "منقضی شده",
+            "admin_stop": "توقف توسط ادمین"  # New admin stop reason
         }.get(reason, reason)
 
         text = f"سیگنال {tracking.signal.symbol} بسته شد\nدلیل: {reason_text}"
@@ -415,6 +416,53 @@ class TelegramService:
             )
 
         return sent_message
+
+    async def send_admin_stop_message(self, tracking: Tracking, uow: UnitOfWork) -> SentMessage | None:
+        """Send admin stop notification"""
+        return await self.send_signal_closed(tracking, "admin_stop", uow)
+
+    async def send_admin_entry_hit(self, tracking: Tracking, entry_position: int, uow: UnitOfWork) -> SentMessage | None:
+        """Send admin-triggered entry hit notification"""
+        if not self.states.bot_enabled:
+            logger.trace("Bot disabled, skipping admin entry hit send")
+            return None
+
+        # Get the entry price
+        entries = tracking.signal.entries
+        if entry_position < 1 or entry_position > len(entries):
+            logger.error(f"Invalid entry position {entry_position} for tracking {tracking.id}")
+            return None
+
+        entry_price = str(entries[entry_position - 1].price)
+        
+        # Calculate target for second entry if needed
+        target = None
+        if entry_position == 2:
+            # For second entry, calculate new TP1 if needed
+            avg_entry = self._get_effective_entry_price(tracking=tracking)
+            if avg_entry and tracking.signal.targets:
+                target = avg_entry  # Simplified - use average entry as target reference
+
+        # Use existing entry hit method with admin context
+        return await self.send_entry_hit(tracking, entry_position, entry_price, uow, target)
+
+    async def send_admin_tp_hit(self, tracking: Tracking, tp_position: int, uow: UnitOfWork) -> SentMessage | None:
+        """Send admin-triggered TP hit notification"""
+        if not self.states.bot_enabled:
+            logger.trace("Bot disabled, skipping admin TP hit send")
+            return None
+
+        # Get the TP hit record that was created
+        tp_hit = None
+        async with self._uow_factory() as temp_uow:
+            tp_hit = await temp_uow.tp_hits.get_by_tracking_and_position(tracking.id, tp_position)
+
+        if not tp_hit:
+            logger.error(f"TP hit record not found for tracking {tracking.id}, position {tp_position}")
+            return None
+
+        # Use existing TP hit method
+        return await self.send_tp_hit(tracking, tp_hit, uow)
 
     async def send_pnl(self, pnldto: PnlDTO):
         """

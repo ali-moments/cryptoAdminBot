@@ -12,6 +12,9 @@ from app.telegram.admin.keyboards import (
     build_sources_keyboard,
     build_trackings_keyboard,
     build_confirmation_keyboard,
+    build_tracking_detail_keyboard,
+    build_tp_selection_keyboard,
+    build_entry_selection_keyboard,
 )
 
 
@@ -138,9 +141,35 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, a
             source_id = int(data.split(":")[1])
             await handle_source_toggle(update, context, admin_service, source_id)
             
+        elif data.startswith("tracking_detail:"):
+            tracking_id = int(data.split(":")[1])
+            await show_tracking_detail(update, context, admin_service, tracking_id)
+            
         elif data.startswith("tracking_info:"):
             tracking_id = int(data.split(":")[1])
             await show_tracking_info(update, context, admin_service, tracking_id)
+            
+        elif data.startswith("stop_tracking:"):
+            tracking_id = int(data.split(":")[1])
+            await handle_tracking_stop(update, context, admin_service, tracking_id)
+            
+        elif data.startswith("tp_menu:"):
+            tracking_id = int(data.split(":")[1])
+            await show_tp_selection(update, context, admin_service, tracking_id)
+            
+        elif data.startswith("entry_menu:"):
+            tracking_id = int(data.split(":")[1])
+            await show_entry_selection(update, context, admin_service, tracking_id)
+            
+        elif data.startswith("send_tp:"):
+            parts = data.split(":")
+            tracking_id, tp_position = int(parts[1]), int(parts[2])
+            await handle_send_tp(update, context, admin_service, tracking_id, tp_position)
+            
+        elif data.startswith("send_entry:"):
+            parts = data.split(":")
+            tracking_id, entry_position = int(parts[1]), int(parts[2])
+            await handle_send_entry(update, context, admin_service, tracking_id, entry_position)
             
         elif data.startswith("close_tracking:"):
             tracking_id = int(data.split(":")[1])
@@ -377,49 +406,9 @@ async def handle_source_toggle(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def show_tracking_info(update: Update, context: ContextTypes.DEFAULT_TYPE, admin_service: AdminService, tracking_id: int) -> None:
-    """Show detailed tracking information."""
-    try:
-        # Get tracking details from the trackings page data
-        trackings_data = await admin_service.get_trackings_page(0, page_size=100)  # Get all trackings
-        tracking = next((t for t in trackings_data["trackings"] if t["id"] == tracking_id), None)
-        
-        if not tracking:
-            await update.callback_query.edit_message_text("❌ Tracking not found.")
-            return
-        
-        dir_emoji = "📈" if tracking["direction"] == "LONG" else "📉"
-        
-        info_text = (
-            f"{dir_emoji} *{tracking['symbol']} Details*\n\n"
-            f"Direction: {tracking['direction']}\n"
-            f"Source: {tracking['source_name']}\n"
-            f"Status: {tracking['status'].replace('_', ' ').title()}\n"
-            f"Entry Method: {tracking['entry_method'].replace('_', ' ').title()}\n"
-            f"Entry 1 Touched: {'Yes' if tracking['entry1_touched'] else 'No'}\n"
-            f"Entry 2 Touched: {'Yes' if tracking['entry2_touched'] else 'No'}\n"
-            f"Highest TP Hit: {tracking['highest_target_hit']}\n"
-            f"Started: {tracking['started_at'][:19].replace('T', ' ')}"
-        )
-        
-        # Action buttons
-        keyboard = [
-            [
-                InlineKeyboardButton("❌ Close", callback_data=f"close_tracking:{tracking_id}"),
-                InlineKeyboardButton("🚫 Cancel", callback_data=f"cancel_tracking:{tracking_id}"),
-            ],
-            [InlineKeyboardButton("🔙 Back to Trackings", callback_data="trackings:0")],
-        ]
-        
-        await safe_edit_message(
-            update.callback_query,
-            info_text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
-        )
-        
-    except Exception as e:
-        logger.error(f"Error showing tracking info: {e}")
-        await update.callback_query.edit_message_text(f"❌ Error: {str(e)}")
+    """Show detailed tracking information - redirects to new detail view."""
+    # Redirect to the new detailed view
+    await show_tracking_detail(update, context, admin_service, tracking_id)
 
 
 async def show_tracking_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE, admin_service: AdminService, tracking_id: int, action: str) -> None:
@@ -504,4 +493,209 @@ async def handle_tracking_cancel(update: Update, context: ContextTypes.DEFAULT_T
             
     except Exception as e:
         logger.error(f"Error cancelling tracking: {e}")
+        await update.callback_query.edit_message_text(f"❌ Error: {str(e)}")
+
+
+async def show_tracking_detail(update: Update, context: ContextTypes.DEFAULT_TYPE, admin_service: AdminService, tracking_id: int) -> None:
+    """Show detailed tracking information with action buttons."""
+    try:
+        result = await admin_service.get_tracking_detail(tracking_id)
+        
+        if not result["success"]:
+            await update.callback_query.edit_message_text(f"❌ {result['message']}")
+            return
+        
+        tracking = result["tracking"]
+        dir_emoji = "📈" if tracking["direction"] == "LONG" else "📉"
+        
+        # Build detailed info text
+        info_text = (
+            f"{dir_emoji} *{tracking['symbol']} Details*\n\n"
+            f"Direction: {tracking['direction']}\n"
+            f"Source: {tracking['source_name']}\n"
+            f"Status: {tracking['status'].replace('_', ' ').title()}\n"
+            f"Entry Method: {tracking['entry_method'].replace('_', ' ').title()}\n"
+        )
+        
+        # Add entry information
+        if tracking["entries"]:
+            info_text += "\n📍 *Entry Levels:*\n"
+            for entry in tracking["entries"]:
+                status = "✅" if entry["touched"] else "⭕"
+                info_text += f"  Entry{entry['position']}: ${entry['price']:,.2f} {status}\n"
+        
+        # Add target information
+        if tracking["targets"]:
+            info_text += "\n🎯 *Target Levels:*\n"
+            for target in tracking["targets"]:
+                status = "✅" if target["hit"] else "⭕"
+                info_text += f"  TP{target['position']}: ${target['price']:,.2f} {status}\n"
+        
+        # Add current price info
+        if tracking["actual_entry_price"]:
+            info_text += f"\n💰 Entry Price: ${tracking['actual_entry_price']:,.2f}"
+        
+        info_text += f"\n🛡️ Stop Loss: ${tracking['current_stop_loss']:,.2f}"
+        
+        if tracking["started_at"]:
+            info_text += f"\n⏰ Started: {tracking['started_at'][:19].replace('T', ' ')}"
+        
+        keyboard = build_tracking_detail_keyboard(tracking_id)
+        
+        await safe_edit_message(
+            update.callback_query,
+            info_text,
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error showing tracking detail: {e}")
+        await update.callback_query.edit_message_text(f"❌ Error: {str(e)}")
+
+
+async def handle_tracking_stop(update: Update, context: ContextTypes.DEFAULT_TYPE, admin_service: AdminService, tracking_id: int) -> None:
+    """Handle tracking stop action."""
+    try:
+        result = await admin_service.stop_tracking(tracking_id)
+        
+        if result["success"]:
+            await safe_edit_message(
+                update.callback_query,
+                f"⏹️ Tracking for *{result['symbol']}* has been stopped.\n\nReturning to trackings...",
+                parse_mode="Markdown"
+            )
+            
+            # Return to trackings page
+            import asyncio
+            await asyncio.sleep(1)
+            await show_trackings_page(update, context, admin_service, 0, edit=True)
+        else:
+            await update.callback_query.edit_message_text(f"❌ {result['message']}")
+            
+    except Exception as e:
+        logger.error(f"Error stopping tracking: {e}")
+        await update.callback_query.edit_message_text(f"❌ Error: {str(e)}")
+
+
+async def show_tp_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, admin_service: AdminService, tracking_id: int) -> None:
+    """Show TP selection submenu."""
+    try:
+        targets = await admin_service.get_tracking_targets(tracking_id)
+        
+        if not targets:
+            await update.callback_query.edit_message_text("❌ No targets found for this tracking.")
+            return
+        
+        keyboard = build_tp_selection_keyboard(tracking_id, targets)
+        
+        # Build TP selection text
+        text = "🎯 *Select Target Profit*\n\n"
+        
+        available_count = sum(1 for target in targets if target["available"])
+        if available_count == 0:
+            text += "All target profits have already been hit.\n\n"
+        else:
+            text += f"Available TPs: {available_count}\n\n"
+            
+        # Show all targets with status
+        for target in targets:
+            status = "✅ Hit" if target["hit"] else "⭕ Available" if target["available"] else "❌ N/A"
+            text += f"TP{target['position']}: ${target['price']:,.2f} - {status}\n"
+        
+        await safe_edit_message(
+            update.callback_query,
+            text,
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error showing TP selection: {e}")
+        await update.callback_query.edit_message_text(f"❌ Error: {str(e)}")
+
+
+async def show_entry_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, admin_service: AdminService, tracking_id: int) -> None:
+    """Show entry selection submenu."""
+    try:
+        result = await admin_service.get_tracking_detail(tracking_id)
+        
+        if not result["success"]:
+            await update.callback_query.edit_message_text(f"❌ {result['message']}")
+            return
+        
+        entries = result["tracking"]["entries"]
+        keyboard = build_entry_selection_keyboard(tracking_id, entries)
+        
+        # Build entry selection text
+        text = "📍 *Select Entry Level*\n\n"
+        
+        available_count = sum(1 for entry in entries if not entry["touched"])
+        if available_count == 0:
+            text += "All entry levels have already been touched.\n\n"
+        else:
+            text += f"Available Entries: {available_count}\n\n"
+            
+        # Show all entries with status
+        for entry in entries:
+            status = "✅ Touched" if entry["touched"] else "⭕ Available"
+            text += f"Entry{entry['position']}: ${entry['price']:,.2f} - {status}\n"
+        
+        await safe_edit_message(
+            update.callback_query,
+            text,
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error showing entry selection: {e}")
+        await update.callback_query.edit_message_text(f"❌ Error: {str(e)}")
+
+
+async def handle_send_tp(update: Update, context: ContextTypes.DEFAULT_TYPE, admin_service: AdminService, tracking_id: int, tp_position: int) -> None:
+    """Handle send TP hit action."""
+    try:
+        result = await admin_service.send_tp_hit(tracking_id, tp_position)
+        
+        if result["success"]:
+            await safe_edit_message(
+                update.callback_query,
+                f"🎯 TP{tp_position} hit sent for *{result['symbol']}*!\n\nReturning to tracking details...",
+                parse_mode="Markdown"
+            )
+            
+            # Return to tracking detail page
+            import asyncio
+            await asyncio.sleep(1)
+            await show_tracking_detail(update, context, admin_service, tracking_id)
+        else:
+            await update.callback_query.edit_message_text(f"❌ {result['message']}")
+            
+    except Exception as e:
+        logger.error(f"Error sending TP hit: {e}")
+        await update.callback_query.edit_message_text(f"❌ Error: {str(e)}")
+
+
+async def handle_send_entry(update: Update, context: ContextTypes.DEFAULT_TYPE, admin_service: AdminService, tracking_id: int, entry_position: int) -> None:
+    """Handle send entry hit action."""
+    try:
+        result = await admin_service.send_entry_hit(tracking_id, entry_position)
+        
+        if result["success"]:
+            await safe_edit_message(
+                update.callback_query,
+                f"📍 Entry{entry_position} hit sent for *{result['symbol']}*!\n\nReturning to tracking details...",
+                parse_mode="Markdown"
+            )
+            
+            # Return to tracking detail page
+            import asyncio
+            await asyncio.sleep(1)
+            await show_tracking_detail(update, context, admin_service, tracking_id)
+        else:
+            await update.callback_query.edit_message_text(f"❌ {result['message']}")
+            
+    except Exception as e:
+        logger.error(f"Error sending entry hit: {e}")
         await update.callback_query.edit_message_text(f"❌ Error: {str(e)}")

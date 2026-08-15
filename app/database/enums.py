@@ -33,6 +33,7 @@ class CloseReason(str, Enum):
     ALL_TARGETS_HIT = "ALL_TARGETS_HIT"
     CANCELLED = "CANCELLED"
     EXPIRED = "EXPIRED"
+    ADMIN_STOP = "ADMIN_STOP"
 
 
 class MessageType(str, Enum):

@@ -58,7 +58,7 @@ def build_trackings_keyboard(trackings: list, current_page: int, total_pages: in
     """Build trackings list keyboard with pagination."""
     keyboard = []
     
-    # Tracking rows
+    # Tracking rows - only show tracking selection buttons
     for tracking in trackings:
         symbol = tracking["symbol"]
         direction = tracking["direction"]
@@ -74,14 +74,7 @@ def build_trackings_keyboard(trackings: list, current_page: int, total_pages: in
         }.get(status, "❓")
         
         button_text = f"{dir_emoji} {symbol} {status_emoji}"
-        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"tracking_info:{tracking['id']}")])
-        
-        # Action buttons for this tracking
-        action_buttons = [
-            InlineKeyboardButton("❌ Close", callback_data=f"close_tracking:{tracking['id']}"),
-            InlineKeyboardButton("🚫 Cancel", callback_data=f"cancel_tracking:{tracking['id']}"),
-        ]
-        keyboard.append(action_buttons)
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"tracking_detail:{tracking['id']}")])
     
     # Pagination row
     if trackings:  # Only show pagination if there are trackings
@@ -110,4 +103,81 @@ def build_confirmation_keyboard(action: str, tracking_id: int) -> InlineKeyboard
             InlineKeyboardButton("❌ Cancel", callback_data="trackings:0"),
         ]
     ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def build_tracking_detail_keyboard(tracking_id: int) -> InlineKeyboardMarkup:
+    """Build tracking detail view keyboard with action buttons."""
+    keyboard = [
+        # Action buttons row 1
+        [
+            InlineKeyboardButton("🚫 Cancel", callback_data=f"cancel_tracking:{tracking_id}"),
+            InlineKeyboardButton("❌ Close", callback_data=f"close_tracking:{tracking_id}"),
+        ],
+        # Action buttons row 2
+        [
+            InlineKeyboardButton("⏹️ Stop", callback_data=f"stop_tracking:{tracking_id}"),
+            InlineKeyboardButton("🎯 Send TP", callback_data=f"tp_menu:{tracking_id}"),
+        ],
+        # Entry button row
+        [
+            InlineKeyboardButton("📍 Send Entry", callback_data=f"entry_menu:{tracking_id}"),
+        ],
+        # Back button
+        [InlineKeyboardButton("🔙 Back to Trackings", callback_data="trackings:0")],
+    ]
+    
+    return InlineKeyboardMarkup(keyboard)
+
+
+def build_tp_selection_keyboard(tracking_id: int, targets: list) -> InlineKeyboardMarkup:
+    """Build TP selection submenu keyboard."""
+    keyboard = []
+    
+    # TP target buttons
+    for target in targets:
+        position = target["position"]
+        price = target["price"]
+        hit = target["hit"]
+        available = target["available"]
+        
+        # Only show available (unhit) targets
+        if available:
+            button_text = f"🎯 TP{position} (${price:,.2f})"
+            callback_data = f"send_tp:{tracking_id}:{position}"
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+    
+    # Show message if no targets available
+    if not any(target["available"] for target in targets):
+        keyboard.append([InlineKeyboardButton("ℹ️ All TPs already hit", callback_data="noop")])
+    
+    # Back button
+    keyboard.append([InlineKeyboardButton("🔙 Back to Details", callback_data=f"tracking_detail:{tracking_id}")])
+    
+    return InlineKeyboardMarkup(keyboard)
+
+
+def build_entry_selection_keyboard(tracking_id: int, entries: list) -> InlineKeyboardMarkup:
+    """Build entry selection submenu keyboard."""
+    keyboard = []
+    
+    # Entry buttons
+    for entry in entries:
+        position = entry["position"]
+        price = entry["price"]
+        touched = entry["touched"]
+        
+        # Only show untouched entries
+        if not touched:
+            button_text = f"📍 Entry{position} (${price:,.2f})"
+            callback_data = f"send_entry:{tracking_id}:{position}"
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+    
+    # Show message if no entries available
+    if all(entry["touched"] for entry in entries):
+        keyboard.append([InlineKeyboardButton("ℹ️ All entries already touched", callback_data="noop")])
+    
+    # Back button
+    keyboard.append([InlineKeyboardButton("🔙 Back to Details", callback_data=f"tracking_detail:{tracking_id}")])
+    
     return InlineKeyboardMarkup(keyboard)

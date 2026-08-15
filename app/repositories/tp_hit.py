@@ -22,6 +22,22 @@ class TpHitRepository(BaseRepository[TpHit]):
 
         result = await self.session.scalars(stmt)
         return list(result)
+
+    async def get_by_tracking_and_position(
+        self,
+        tracking_id: int,
+        position: int,
+    ) -> TpHit | None:
+        """Get TP hit by tracking ID and position."""
+        stmt = (
+            select(TpHit)
+            .where(
+                TpHit.tracking_id == tracking_id,
+                TpHit.position == position
+            )
+        )
+
+        return await self.session.scalar(stmt)
     # === Scoring-specific queries ===
 
     async def count_by_source(

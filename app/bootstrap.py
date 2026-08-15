@@ -180,11 +180,12 @@ def build_application() -> Application:
     # Create statistics service for admin bot
     statistics_service = StatisticsService(UnitOfWork)
 
-    # Create admin service
+    # Create admin service with telegram integration
     admin_service = AdminService(
         uow_factory=UnitOfWork,
         statistics_service=statistics_service,
         states=states,
+        telegram_service=telegram_service,  # Add telegram service dependency
     )
 
     # Create admin bot
