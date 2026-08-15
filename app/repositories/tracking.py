@@ -20,6 +20,7 @@ class TrackingRepository(BaseRepository[Tracking]):
             .options(
                 selectinload(Tracking.signal).selectinload(Signal.entries),
                 selectinload(Tracking.signal).selectinload(Signal.targets),
+                selectinload(Tracking.signal).selectinload(Signal.source),
                 selectinload(Tracking.tp_hits),
             )
         )
@@ -33,6 +34,7 @@ class TrackingRepository(BaseRepository[Tracking]):
             .options(
                 selectinload(Tracking.signal).selectinload(Signal.entries),
                 selectinload(Tracking.signal).selectinload(Signal.targets),
+                selectinload(Tracking.signal).selectinload(Signal.source),
                 selectinload(Tracking.tp_hits),
             )
         )

@@ -2,6 +2,7 @@
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+from telegram.error import BadRequest
 from loguru import logger
 
 from app.config.settings import settings
@@ -12,6 +13,25 @@ from app.telegram.admin.keyboards import (
     build_trackings_keyboard,
     build_confirmation_keyboard,
 )
+
+
+async def safe_edit_message(query, text: str, reply_markup=None, parse_mode=None) -> bool:
+    """Safely edit a message, handling 'Message is not modified' errors.
+    
+    Returns True if message was edited, False if no change needed.
+    """
+    try:
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+        return True
+    except BadRequest as e:
+        if "Message is not modified" in str(e):
+            logger.debug("Message content unchanged, skipping edit")
+            return False
+        # Re-raise other BadRequest errors
+        raise
+    except Exception:
+        # Re-raise other exceptions
+        raise
 
 
 def is_admin(user_id: int) -> bool:
@@ -180,7 +200,12 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, adm
         )
         
         if edit and update.callback_query:
-            await update.callback_query.edit_message_text(menu_text, reply_markup=keyboard, parse_mode="Markdown")
+            await safe_edit_message(
+                update.callback_query,
+                menu_text,
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
         else:
             await update.message.reply_text(menu_text, reply_markup=keyboard, parse_mode="Markdown")
             
@@ -199,7 +224,8 @@ async def handle_toggle_bot(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         new_state = admin_service.toggle_bot_enabled()
         status_text = "enabled" if new_state else "disabled"
         
-        await update.callback_query.edit_message_text(
+        await safe_edit_message(
+            update.callback_query,
             f"🤖 Bot has been *{status_text}*.\n\nReturning to main menu...",
             parse_mode="Markdown"
         )
@@ -218,7 +244,7 @@ async def handle_toggle_dev(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     """Handle dev mode toggle."""
     try:
         # Show processing message
-        await update.callback_query.edit_message_text("⚙️ Toggling dev mode and closing active trackings...")
+        await safe_edit_message(update.callback_query, "⚙️ Toggling dev mode and closing active trackings...")
         
         result = await admin_service.toggle_dev_mode()
         
@@ -226,7 +252,8 @@ async def handle_toggle_dev(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             mode_text = "Development" if result["new_dev_mode"] else "Production"
             closed_text = f"\n🔄 Closed {result['closed_trackings']} active trackings." if result["closed_trackings"] > 0 else ""
             
-            await update.callback_query.edit_message_text(
+            await safe_edit_message(
+                update.callback_query,
                 f"⚙️ Mode switched to *{mode_text}*{closed_text}\n\nReturning to main menu...",
                 parse_mode="Markdown"
             )
@@ -268,7 +295,7 @@ async def show_sources_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                 text += f"Signals: {source['total_signals']} | TP Rate: {source['tp_hit_rate']:.1f}%\n\n"
         
         if edit:
-            await update.callback_query.edit_message_text(text, reply_markup=keyboard, parse_mode="Markdown")
+            await safe_edit_message(update.callback_query, text, reply_markup=keyboard, parse_mode="Markdown")
         else:
             await update.message.reply_text(text, reply_markup=keyboard, parse_mode="Markdown")
             
@@ -311,7 +338,7 @@ async def show_trackings_page(update: Update, context: ContextTypes.DEFAULT_TYPE
                 text += "\n"
         
         if edit:
-            await update.callback_query.edit_message_text(text, reply_markup=keyboard, parse_mode="Markdown")
+            await safe_edit_message(update.callback_query, text, reply_markup=keyboard, parse_mode="Markdown")
         else:
             await update.message.reply_text(text, reply_markup=keyboard, parse_mode="Markdown")
             
@@ -331,7 +358,8 @@ async def handle_source_toggle(update: Update, context: ContextTypes.DEFAULT_TYP
         
         if result["success"]:
             status = "enabled" if result["new_status"] else "disabled"
-            await update.callback_query.edit_message_text(
+            await safe_edit_message(
+                update.callback_query,
                 f"📋 Source *{result['source_name']}* has been {status}.\n\nReturning to sources...",
                 parse_mode="Markdown"
             )
@@ -382,7 +410,8 @@ async def show_tracking_info(update: Update, context: ContextTypes.DEFAULT_TYPE,
             [InlineKeyboardButton("🔙 Back to Trackings", callback_data="trackings:0")],
         ]
         
-        await update.callback_query.edit_message_text(
+        await safe_edit_message(
+            update.callback_query,
             info_text,
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
@@ -416,7 +445,8 @@ async def show_tracking_confirmation(update: Update, context: ContextTypes.DEFAU
         
         keyboard = build_confirmation_keyboard(action, tracking_id)
         
-        await update.callback_query.edit_message_text(
+        await safe_edit_message(
+            update.callback_query,
             confirmation_text,
             reply_markup=keyboard,
             parse_mode="Markdown"
@@ -434,7 +464,8 @@ async def handle_tracking_close(update: Update, context: ContextTypes.DEFAULT_TY
         
         if result["success"]:
             action_type = result["action_type"]
-            await update.callback_query.edit_message_text(
+            await safe_edit_message(
+                update.callback_query,
                 f"✅ Tracking for *{result['symbol']}* has been {action_type}.\n\nReturning to trackings...",
                 parse_mode="Markdown"
             )
@@ -458,7 +489,8 @@ async def handle_tracking_cancel(update: Update, context: ContextTypes.DEFAULT_T
         
         if result["success"]:
             action_type = result["action_type"]
-            await update.callback_query.edit_message_text(
+            await safe_edit_message(
+                update.callback_query,
                 f"✅ Tracking for *{result['symbol']}* has been {action_type}.\n\nReturning to trackings...",
                 parse_mode="Markdown"
             )
