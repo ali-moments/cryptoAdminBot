@@ -3,32 +3,26 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from app.database.enums import TrackingStatus, AuditEventType
-from app.engine.actions import TrackingCompleted, WaitingEntryExpired
+from app.database.enums import TrackingStatus, AuditEventType, CloseReason
 from app.services.settings import States
 from app.services.statistics import StatisticsService
-
-if TYPE_CHECKING:
-    from app.engine.action_processor import ActionProcessor
 
 
 class AdminService:
     """Service layer for admin bot operations.
 
     Handles admin commands while delegating to existing services and repositories.
-    Never directly modifies tracking state - uses ActionProcessor for proper state transitions.
+    Directly manages tracking status changes for admin operations.
     """
 
     def __init__(
         self,
         uow_factory,
         statistics_service: StatisticsService,
-        action_processor: "ActionProcessor",
         states: States,
     ) -> None:
         self._uow_factory = uow_factory
         self._statistics = statistics_service
-        self._action_processor = action_processor
         self._states = states
 
     # ================================
@@ -172,7 +166,7 @@ class AdminService:
             }
 
     async def close_tracking(self, tracking_id: int, reason: str = "admin_close") -> dict:
-        """Close a tracking using existing ActionProcessor."""
+        """Close a tracking by setting status to CANCELLED and is_active to False."""
         async with self._uow_factory() as uow:
             tracking = await uow.trackings.get_full(tracking_id)
             if not tracking:
@@ -181,23 +175,14 @@ class AdminService:
             if not tracking.is_active:
                 return {"success": False, "message": "Tracking already closed"}
 
-            # Create appropriate action based on current status
+            # Directly update tracking status and deactivate
             current_time = datetime.now(UTC)
-
-            if tracking.status == TrackingStatus.WAITING_ENTRY:
-                # For waiting entry, use WaitingEntryExpired
-                action = WaitingEntryExpired(
-                    timestamp=current_time,
-                    reason=f"admin_cancelled_{reason}",
-                )
-            else:
-                # For active tracking, use TrackingCompleted
-                action = TrackingCompleted(
-                    timestamp=current_time,
-                )
-
-            # Process action through ActionProcessor
-            await self._action_processor.process(tracking, [action], uow)
+            old_status = tracking.status
+            
+            tracking.status = TrackingStatus.CANCELLED
+            tracking.is_active = False
+            tracking.closed_at = current_time
+            tracking.close_reason = CloseReason.CANCELLED
 
             # Add admin audit log
             await uow.audit_logs.create(
@@ -208,18 +193,20 @@ class AdminService:
                     "reason": f"admin_{reason}",
                     "admin_action": True,
                     "timestamp": current_time.isoformat(),
+                    "old_status": old_status.value,
+                    "new_status": TrackingStatus.CANCELLED.value,
                 },
             )
 
             await uow.commit()
 
-            logger.info(f"Tracking {tracking_id} ({tracking.signal.symbol}) closed by admin")
+            logger.info(f"Tracking {tracking_id} ({tracking.signal.symbol}) cancelled by admin")
 
             return {
                 "success": True,
                 "tracking_id": tracking_id,
                 "symbol": tracking.signal.symbol,
-                "action_type": "cancelled" if tracking.status == TrackingStatus.WAITING_ENTRY else "closed",
+                "action_type": "cancelled",
             }
 
     async def cancel_tracking(self, tracking_id: int) -> dict:
@@ -231,7 +218,7 @@ class AdminService:
     # ================================
 
     async def toggle_dev_mode(self) -> dict:
-        """Toggle dev mode and properly close all active trackings first."""
+        """Toggle dev mode and properly cancel all active trackings first."""
         # Step 1: Get all active trackings
         async with self._uow_factory() as uow:
             active_trackings = await uow.trackings.get_active()
@@ -247,25 +234,17 @@ class AdminService:
                     "closed_trackings": 0,
                 }
 
-            # Step 2: Close all active trackings
+            # Step 2: Cancel all active trackings by setting status to CANCELLED and is_active to False
             current_time = datetime.now(UTC)
             closed_count = 0
 
             for tracking in active_trackings:
                 try:
-                    # Choose appropriate action based on status
-                    if tracking.status == TrackingStatus.WAITING_ENTRY:
-                        action = WaitingEntryExpired(
-                            timestamp=current_time,
-                            reason="dev_mode_toggle",
-                        )
-                    else:
-                        action = TrackingCompleted(
-                            timestamp=current_time,
-                        )
-
-                    # Process through ActionProcessor
-                    await self._action_processor.process(tracking, [action], uow)
+                    # Directly update tracking status and deactivate
+                    tracking.status = TrackingStatus.CANCELLED
+                    tracking.is_active = False
+                    tracking.closed_at = current_time
+                    tracking.close_reason = CloseReason.CANCELLED
 
                     # Add admin audit log
                     await uow.audit_logs.create(
@@ -276,22 +255,25 @@ class AdminService:
                             "reason": "dev_mode_toggle",
                             "admin_action": True,
                             "timestamp": current_time.isoformat(),
+                            "old_status": tracking.status.value,
+                            "new_status": TrackingStatus.CANCELLED.value,
                         },
                     )
 
                     closed_count += 1
+                    logger.info(f"Tracking {tracking.id} ({tracking.signal.symbol}) cancelled due to dev mode toggle")
 
                 except Exception as e:
-                    logger.error(f"Failed to close tracking {tracking.id} during dev mode toggle: {e}")
+                    logger.error(f"Failed to cancel tracking {tracking.id} during dev mode toggle: {e}")
                     # Continue with other trackings
                     continue
 
             await uow.commit()
 
-            # Step 3: Only after all trackings are closed, toggle dev mode
+            # Step 3: Only after all trackings are cancelled, toggle dev mode
             new_dev_mode = self._states.toggle_dev_mode()
 
-            logger.info(f"Dev mode toggled by admin: {closed_count} trackings closed, new mode: {'dev' if new_dev_mode else 'production'}")
+            logger.info(f"Dev mode toggled by admin: {closed_count} trackings cancelled, new mode: {'dev' if new_dev_mode else 'production'}")
 
             return {
                 "success": True,

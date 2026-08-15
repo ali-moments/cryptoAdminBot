@@ -244,13 +244,13 @@ async def handle_toggle_dev(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     """Handle dev mode toggle."""
     try:
         # Show processing message
-        await safe_edit_message(update.callback_query, "⚙️ Toggling dev mode and closing active trackings...")
+        await safe_edit_message(update.callback_query, "⚙️ Toggling dev mode and cancelling active trackings...")
         
         result = await admin_service.toggle_dev_mode()
         
         if result["success"]:
             mode_text = "Development" if result["new_dev_mode"] else "Production"
-            closed_text = f"\n🔄 Closed {result['closed_trackings']} active trackings." if result["closed_trackings"] > 0 else ""
+            closed_text = f"\n🔄 Cancelled {result['closed_trackings']} active trackings." if result["closed_trackings"] > 0 else ""
             
             await safe_edit_message(
                 update.callback_query,

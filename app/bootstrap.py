@@ -184,7 +184,6 @@ def build_application() -> Application:
     admin_service = AdminService(
         uow_factory=UnitOfWork,
         statistics_service=statistics_service,
-        action_processor=action_processor,
         states=states,
     )
 
