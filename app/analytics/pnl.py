@@ -47,6 +47,8 @@ class PnlAnalytics:
         """Calculate PNL for signals created in time window."""
         items = []
         total_pnl = Decimal("0")
+        tp_count = 0  # Count of signals that hit TP
+        stop_count = 0  # Count of signals that hit STOP
         
         async with self._uow:
             # Get ALL trackings (active + closed) for signals created in period
@@ -57,11 +59,26 @@ class PnlAnalytics:
                 pnl_item = await self._build_pnl_item(tracking)
                 if pnl_item:
                     items.append(pnl_item)
+                    
+                    # Count for win rate calculation (exclude OPEN signals)
+                    if pnl_item.status.startswith("TP"):
+                        tp_count += 1
+                    elif pnl_item.status == "STOP":
+                        stop_count += 1
+                    
                     # Only realized PNL contributes to total
                     if pnl_item.status != "OPEN":
                         total_pnl += pnl_item.pnl
         
-        return PnlDTO(items=items, total=total_pnl)
+        # Calculate win rate: (TP signals / (TP signals + STOP signals)) * 100
+        total_closed_signals = tp_count + stop_count
+        if total_closed_signals > 0:
+            win_rate = (Decimal(tp_count) / Decimal(total_closed_signals)) * Decimal("100")
+            win_rate = win_rate.quantize(Decimal("0.01"))
+        else:
+            win_rate = Decimal("0")
+        
+        return PnlDTO(items=items, total=total_pnl, win_rate=win_rate)
     
     async def _build_pnl_item(self, tracking) -> Optional[PNLItem]:
         """Build PNL item for any tracking (active or closed)."""
@@ -113,12 +130,15 @@ class PnlAnalytics:
             # Closed for other reasons (ALL_TARGETS_HIT handled by TP logic above)
             return None
         
+        # Apply leverage to the profit for display purposes
+        leveraged_pnl = pnl * signal.leverage
+        
         return PNLItem(
             symbol=signal.symbol,
             signal_msg_id=signal_msg_id,
             status=status,
             status_msg_id=status_msg_id,
-            pnl=pnl,
+            pnl=leveraged_pnl,
         )
     
     async def _calculate_unrealized_pnl(self, tracking) -> Decimal:

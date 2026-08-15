@@ -35,7 +35,7 @@ class TelegramFormatter:
         if isinstance(value, str):
             try:
                 value = Decimal(value)
-            except:
+            except Exception:
                 return value
 
         # Convert to Decimal if it's a float
@@ -168,7 +168,10 @@ class TelegramFormatter:
             ))
 
         content = '\n'.join(pnl_items)
-        footer = self.templates.PNL_FOOTER.format(pnl=self._normalize_number(stats.total))
+        footer = self.templates.PNL_FOOTER.format(
+            win_rate=self._normalize_number(stats.win_rate),
+            #pnl=self._normalize_number(stats.total)
+        )
         return header + content + footer
 
     def format_good_morning(self):

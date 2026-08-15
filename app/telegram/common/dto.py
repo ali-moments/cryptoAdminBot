@@ -60,6 +60,7 @@ class PNLItem:
 class PnlDTO:
     items: List[PNLItem]
     total: Decimal
+    win_rate: Decimal
 
 
 @dataclass(slots=True)
