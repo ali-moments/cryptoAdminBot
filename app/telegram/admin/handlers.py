@@ -62,7 +62,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE, adm
     
     try:
         stats = await admin_service.get_system_stats()
-        bot_status = await admin_service.get_bot_status()
+        bot_status = admin_service.get_bot_status()
         
         status_text = (
             f"📊 *Bot Status*\n\n"
@@ -157,7 +157,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, adm
     """Show the main admin menu."""
     try:
         stats = await admin_service.get_system_stats()
-        bot_status = await admin_service.get_bot_status()
+        bot_status = admin_service.get_bot_status()
         
         keyboard = build_main_menu(
             bot_enabled=bot_status["bot_enabled"],
