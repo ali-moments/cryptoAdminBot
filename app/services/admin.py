@@ -1,14 +1,16 @@
 from datetime import datetime, UTC
 from typing import TYPE_CHECKING
+from decimal import Decimal
 
 from loguru import logger
 
-from app.database.enums import TrackingStatus, AuditEventType, CloseReason
+from app.database.enums import TrackingStatus, AuditEventType, CloseReason, Direction
 from app.services.settings import States
 from app.services.statistics import StatisticsService
 
 if TYPE_CHECKING:
     from app.services.telegram import TelegramService
+    from app.database.models import Tracking
 
 
 class AdminService:
@@ -299,11 +301,14 @@ class AdminService:
             if not existing_tp:
                 target_price = targets[tp_position - 1].price  # TP positions are 1-indexed
                 
+                # Calculate profit percentage
+                profit_percent = self._calculate_profit_percentage(tracking, target_price)
+                
                 await uow.tp_hits.create(
                     tracking_id=tracking_id,
                     position=tp_position,
                     price=target_price,
-                    profit_percent=0,  # Will be calculated later if needed
+                    profit_percent=profit_percent,
                     hit_at=datetime.now(UTC),
                 )
 
@@ -460,6 +465,55 @@ class AdminService:
                 "success": True,
                 "tracking": tracking_data,
             }
+
+    def _calculate_profit_percentage(self, tracking: "Tracking", target_price: Decimal) -> Decimal:
+        """Calculate profit percentage for a TP hit based on entry and target price."""
+        # Get effective entry price (could be average if both entries touched)
+        effective_entry_price = self._get_effective_entry_price(tracking)
+        
+        if not effective_entry_price or effective_entry_price == 0:
+            # If no entry price available, estimate using signal entries for admin TP
+            signal_entries = tracking.signal.entries
+            if signal_entries:
+                # Use the first entry as a fallback for calculation
+                effective_entry_price = signal_entries[0].price
+            else:
+                return Decimal("0")
+        
+        signal = tracking.signal
+        direction = signal.direction
+        
+        # Calculate profit percentage based on direction
+        if direction == Direction.LONG:
+            # For LONG: profit = (target_price - entry_price) / entry_price * 100
+            profit_percent = ((target_price - effective_entry_price) / effective_entry_price) * Decimal("100")
+        else:
+            # For SHORT: profit = (entry_price - target_price) / entry_price * 100
+            profit_percent = ((effective_entry_price - target_price) / effective_entry_price) * Decimal("100")
+        
+        return profit_percent.quantize(Decimal("0.01"))  # Round to 2 decimal places
+    
+    def _get_effective_entry_price(self, tracking: "Tracking") -> Decimal | None:
+        """Get effective entry price for profit calculations."""
+        if not tracking.actual_entry_price:
+            return None
+
+        signal_entries = tracking.signal.entries
+
+        # If both entries are touched, calculate average entry
+        if tracking.entry1_touched and tracking.entry2_touched:
+            if len(signal_entries) >= 2:
+                entry1_price = signal_entries[0].price
+                entry2_price = signal_entries[1].price
+                avg_entry = (entry1_price + entry2_price) / Decimal("2")
+                return avg_entry.quantize(Decimal("0.00000001"))
+        elif tracking.entry1_touched and tracking.entry_method and tracking.entry_method.value == "EMERGENCY_ENTRY":
+            # Both emergency and entry1 touched - simplified calculation
+            # For admin purposes, we'll use the actual_entry_price
+            pass
+
+        # Otherwise, use the actual entry price
+        return tracking.actual_entry_price
 
     async def get_tracking_targets(self, tracking_id: int) -> list:
         """Get available TP targets for selection menu."""
