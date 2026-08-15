@@ -3,7 +3,7 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 
-def build_main_menu(bot_enabled: bool, dev_mode: bool, active_trackings: int, active_sources: int) -> InlineKeyboardMarkup:
+def build_main_menu(bot_enabled: bool, dev_mode: bool, active_trackings: int, active_sources: int, total_sources: int) -> InlineKeyboardMarkup:
     """Build the main admin menu keyboard."""
     bot_status = "🟢 ON" if bot_enabled else "🔴 OFF"
     dev_status = "🟡 DEV" if dev_mode else "🟢 PROD"
@@ -11,7 +11,7 @@ def build_main_menu(bot_enabled: bool, dev_mode: bool, active_trackings: int, ac
     keyboard = [
         [InlineKeyboardButton(f"📊 Bot Status: {bot_status}", callback_data="toggle_bot")],
         [
-            InlineKeyboardButton(f"📋 Sources ({active_sources})", callback_data="sources:0"),
+            InlineKeyboardButton(f"📋 Sources ({active_sources}/{total_sources})", callback_data="sources:0"),
             InlineKeyboardButton(f"🎯 Trackings ({active_trackings})", callback_data="trackings:0"),
         ],
         [InlineKeyboardButton(f"⚙️ Mode: {dev_status}", callback_data="toggle_dev")],

@@ -30,6 +30,19 @@ class SourceRepository(BaseRepository[SignalSource]):
         result = await self.session.scalars(stmt)
         return list(result)
 
+    async def all(self) -> list[SignalSource]:
+        """Get all sources (active and inactive) ordered by score."""
+        stmt = (
+            select(SignalSource)
+            .order_by(
+                SignalSource.score.desc(),
+                SignalSource.manual_priority.desc(),
+            )
+        )
+
+        result = await self.session.scalars(stmt)
+        return list(result)
+
     async def get_by_channel_id(
         self,
         channel_id: int,

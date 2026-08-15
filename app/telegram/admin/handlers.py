@@ -68,7 +68,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE, adm
             f"📊 *Bot Status*\n\n"
             f"🤖 Bot: {'🟢 Enabled' if bot_status['bot_enabled'] else '🔴 Disabled'}\n"
             f"⚙️ Mode: {'🟡 Development' if bot_status['dev_mode'] else '🟢 Production'}\n"
-            f"📋 Active Sources: {stats['active_sources_count']}\n"
+            f"📋 Sources: {stats['active_sources_count']}/{stats['total_sources_count']} active\n"
             f"🎯 Active Trackings: {stats['active_trackings_count']}\n"
             f"📊 Signals Limit: {stats['signals_limit']}\n"
             f"📺 Target Channel: {bot_status['target_channel']}"
@@ -164,6 +164,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, adm
             dev_mode=bot_status["dev_mode"],
             active_trackings=stats["active_trackings_count"],
             active_sources=stats["active_sources_count"],
+            total_sources=stats["total_sources_count"],
         )
         
         bot_emoji = "🟢" if bot_status["bot_enabled"] else "🔴"
@@ -173,7 +174,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, adm
             f"🤖 *Admin Control Panel*\n\n"
             f"{bot_emoji} Bot Status: {'Enabled' if bot_status['bot_enabled'] else 'Disabled'}\n"
             f"{mode_emoji} Mode: {'Development' if bot_status['dev_mode'] else 'Production'}\n"
-            f"📋 Active Sources: {stats['active_sources_count']}\n"
+            f"📋 Sources: {stats['active_sources_count']}/{stats['total_sources_count']} active\n"
             f"🎯 Active Trackings: {stats['active_trackings_count']}\n"
             f"📊 Signals Limit: {stats['signals_limit']}"
         )

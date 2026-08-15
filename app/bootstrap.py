@@ -178,7 +178,7 @@ def build_application() -> Application:
     scheduler = AppScheduler(telegram_service, pnl_analytics)
 
     # Create statistics service for admin bot
-    statistics_service = StatisticsService(UnitOfWork())
+    statistics_service = StatisticsService(UnitOfWork)
 
     # Create admin service
     admin_service = AdminService(

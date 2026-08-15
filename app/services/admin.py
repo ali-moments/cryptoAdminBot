@@ -58,7 +58,7 @@ class AdminService:
         """Get paginated list of signal sources with scores."""
         async with self._uow_factory() as uow:
             # Get all sources ordered by score
-            sources = await uow.signal_sources.active()
+            sources = await uow.signal_sources.all()
 
             # Calculate pagination
             total = len(sources)
@@ -71,19 +71,27 @@ class AdminService:
             source_data = []
             for source in page_sources:
                 try:
-                    stats = await self._statistics.get_source_statistics(source.id)
+                    # Only get statistics for sources with signals to avoid errors
+                    if source.total_signals > 0:
+                        stats = await self._statistics.get_source_statistics(source.id)
+                        tp_hit_rate = float(stats.tp_hit_rate)
+                        total_signals_from_stats = stats.total_signals
+                    else:
+                        tp_hit_rate = 0.0
+                        total_signals_from_stats = source.total_signals
+                        
                     source_data.append({
                         "id": source.id,
                         "name": source.name,
                         "score": source.score / 100,  # Convert back from ×100 format
                         "is_active": source.is_active,
-                        "total_signals": stats.total_signals,
-                        "tp_hit_rate": float(stats.tp_hit_rate),
+                        "total_signals": total_signals_from_stats,
+                        "tp_hit_rate": tp_hit_rate,
                         "winrate": float(source.winrate) if source.winrate else 0.0,
                     })
                 except Exception as e:
                     logger.warning(f"Failed to get stats for source {source.id}: {e}")
-                    # Fallback to basic data
+                    # Fallback to basic data without statistics service
                     source_data.append({
                         "id": source.id,
                         "name": source.name,
@@ -300,11 +308,13 @@ class AdminService:
         """Get overall system statistics."""
         async with self._uow_factory() as uow:
             active_trackings = await uow.trackings.get_active()
-            active_sources = await uow.signal_sources.active()
+            all_sources = await uow.signal_sources.all()
+            active_sources = [s for s in all_sources if s.is_active]
 
             return {
                 "active_trackings_count": len(active_trackings),
                 "active_sources_count": len(active_sources),
+                "total_sources_count": len(all_sources),
                 "bot_enabled": self._states.bot_enabled,
                 "dev_mode": self._states.dev_mode,
                 "signals_limit": self._states.active_signals_limit,

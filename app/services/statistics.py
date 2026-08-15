@@ -9,20 +9,19 @@ import math
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func
 
 from app.core.dto import SignalStatistics, TimeWindow
-from app.database.enums import SignalStatus, TrackingStatus, CloseReason
-from app.database.models import SignalSource, Signal, Tracking, TpHit
-from app.database.uow import UnitOfWork
+from app.database.enums import SignalStatus, CloseReason
+from app.database.models import Signal, Tracking, TpHit
 from app.services.validation import ScoringValidator, ScoringValidationError
 
 
 class StatisticsService:
     """Service for calculating signal source statistics."""
 
-    def __init__(self, uow: UnitOfWork) -> None:
-        self._uow = uow
+    def __init__(self, uow_factory) -> None:
+        self._uow_factory = uow_factory
         self._validator = ScoringValidator()
 
     async def get_source_statistics(
@@ -37,20 +36,20 @@ class StatisticsService:
         time_window = self._validator.validate_time_window(time_window)
 
         try:
-            async with self._uow:
+            async with self._uow_factory() as uow:
                 # Base query for signals in time window
                 time_filter = self._build_time_filter(time_window)
 
                 # Get basic signal counts
-                total_signals = await self._count_total_signals(source_id, time_filter)
-                completed_signals = await self._count_completed_signals(source_id, time_filter)
-                active_signals = await self._count_active_signals(source_id, time_filter)
+                total_signals = await self._count_total_signals(source_id, time_filter, uow)
+                completed_signals = await self._count_completed_signals(source_id, time_filter, uow)
+                active_signals = await self._count_active_signals(source_id, time_filter, uow)
 
                 # Get TP hit and stop loss counts
-                tp_hit_count = await self._count_tp_hit_signals(source_id, time_filter)
-                stop_loss_count = await self._count_stop_loss_signals(source_id, time_filter)
-                cancelled_count = await self._count_cancelled_signals(source_id, time_filter)
-                expired_count = await self._count_expired_signals(source_id, time_filter)
+                tp_hit_count = await self._count_tp_hit_signals(source_id, time_filter, uow)
+                stop_loss_count = await self._count_stop_loss_signals(source_id, time_filter, uow)
+                cancelled_count = await self._count_cancelled_signals(source_id, time_filter, uow)
+                expired_count = await self._count_expired_signals(source_id, time_filter, uow)
 
                 # Calculate rates with safe division
                 tp_hit_rate = self._validator.handle_division_by_zero_cases(
@@ -61,7 +60,7 @@ class StatisticsService:
                 )
 
                 # Get profit statistics
-                profit_stats = await self._calculate_profit_statistics(source_id, time_filter)
+                profit_stats = await self._calculate_profit_statistics(source_id, time_filter, uow)
 
                 # Create statistics object
                 stats = SignalStatistics(
@@ -108,8 +107,8 @@ class StatisticsService:
     ) -> dict[int, SignalStatistics]:
         """Get statistics for all active sources."""
 
-        async with self._uow:
-            sources = await self._uow.signal_sources.active()
+        async with self._uow_factory() as uow:
+            sources = await uow.signal_sources.active()
 
             statistics = {}
             for source in sources:
@@ -125,7 +124,7 @@ class StatisticsService:
 
         return datetime.now(timezone.utc) - timedelta(hours=time_window.hours)
 
-    async def _count_total_signals(self, source_id: int, time_filter: datetime | None) -> int:
+    async def _count_total_signals(self, source_id: int, time_filter: datetime | None, uow) -> int:
         """Count total signals for source."""
         stmt = (
             select(func.count())
@@ -136,10 +135,10 @@ class StatisticsService:
         if time_filter:
             stmt = stmt.where(Signal.created_at >= time_filter)
 
-        result = await self._uow.session.scalar(stmt)
+        result = await uow.session.scalar(stmt)
         return result or 0
 
-    async def _count_completed_signals(self, source_id: int, time_filter: datetime | None) -> int:
+    async def _count_completed_signals(self, source_id: int, time_filter: datetime | None, uow) -> int:
         """Count completed (decided) signals - those that are CLOSED."""
         stmt = (
             select(func.count())
@@ -153,10 +152,10 @@ class StatisticsService:
         if time_filter:
             stmt = stmt.where(Signal.created_at >= time_filter)
 
-        result = await self._uow.session.scalar(stmt)
+        result = await uow.session.scalar(stmt)
         return result or 0
 
-    async def _count_active_signals(self, source_id: int, time_filter: datetime | None) -> int:
+    async def _count_active_signals(self, source_id: int, time_filter: datetime | None, uow) -> int:
         """Count active signals."""
         stmt = (
             select(func.count())
@@ -170,10 +169,10 @@ class StatisticsService:
         if time_filter:
             stmt = stmt.where(Signal.created_at >= time_filter)
 
-        result = await self._uow.session.scalar(stmt)
+        result = await uow.session.scalar(stmt)
         return result or 0
 
-    async def _count_tp_hit_signals(self, source_id: int, time_filter: datetime | None) -> int:
+    async def _count_tp_hit_signals(self, source_id: int, time_filter: datetime | None, uow) -> int:
         """Count signals that hit at least one TP target."""
         stmt = (
             select(func.count(func.distinct(Signal.id)))
@@ -189,10 +188,10 @@ class StatisticsService:
         if time_filter:
             stmt = stmt.where(Signal.created_at >= time_filter)
 
-        result = await self._uow.session.scalar(stmt)
+        result = await uow.session.scalar(stmt)
         return result or 0
 
-    async def _count_stop_loss_signals(self, source_id: int, time_filter: datetime | None) -> int:
+    async def _count_stop_loss_signals(self, source_id: int, time_filter: datetime | None, uow) -> int:
         """Count signals that hit stop loss."""
         stmt = (
             select(func.count())
@@ -211,10 +210,10 @@ class StatisticsService:
         if time_filter:
             stmt = stmt.where(Signal.created_at >= time_filter)
 
-        result = await self._uow.session.scalar(stmt)
+        result = await uow.session.scalar(stmt)
         return result or 0
 
-    async def _count_cancelled_signals(self, source_id: int, time_filter: datetime | None) -> int:
+    async def _count_cancelled_signals(self, source_id: int, time_filter: datetime | None, uow) -> int:
         """Count cancelled signals."""
         stmt = (
             select(func.count())
@@ -228,10 +227,10 @@ class StatisticsService:
         if time_filter:
             stmt = stmt.where(Signal.created_at >= time_filter)
 
-        result = await self._uow.session.scalar(stmt)
+        result = await uow.session.scalar(stmt)
         return result or 0
 
-    async def _count_expired_signals(self, source_id: int, time_filter: datetime | None) -> int:
+    async def _count_expired_signals(self, source_id: int, time_filter: datetime | None, uow) -> int:
         """Count expired signals."""
         stmt = (
             select(func.count())
@@ -245,13 +244,14 @@ class StatisticsService:
         if time_filter:
             stmt = stmt.where(Signal.created_at >= time_filter)
 
-        result = await self._uow.session.scalar(stmt)
+        result = await uow.session.scalar(stmt)
         return result or 0
 
     async def _calculate_profit_statistics(
         self,
         source_id: int,
         time_filter: datetime | None,
+        uow,
     ) -> dict:
         """Calculate profit-related statistics."""
 
@@ -270,7 +270,7 @@ class StatisticsService:
         if time_filter:
             stmt = stmt.where(Signal.created_at >= time_filter)
 
-        result = await self._uow.session.scalars(stmt)
+        result = await uow.session.scalars(stmt)
         profits = [profit for profit in result if profit is not None]
 
         if not profits:
@@ -334,11 +334,9 @@ class StatisticsService:
         Returns total profits and average profits for all sources
         to enable percentile-based scoring.
         """
-        async with self._uow:
-            time_filter = self._build_time_filter(time_window)
-
+        async with self._uow_factory() as uow:
             # Get all source profit data
-            sources = await self._uow.signal_sources.active()
+            sources = await uow.signal_sources.active()
 
             total_profits = []
             average_profits = []
