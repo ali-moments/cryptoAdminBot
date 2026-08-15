@@ -11,10 +11,12 @@ from app.config.settings import settings
 
 if TYPE_CHECKING:
     from app.services.telegram import TelegramService
+    from app.analytics.pnl import PnlAnalytics
 
 
-# Global reference to telegram service for job functions
+# Global references for job functions
 _telegram_service: "TelegramService | None" = None
+_pnl_analytics: "PnlAnalytics | None" = None
 
 
 async def good_morning_job() -> None:
@@ -47,6 +49,36 @@ async def good_night_job() -> None:
         # Don't re-raise - scheduler should continue running
 
 
+async def calculate_24h_pnl_job() -> None:
+    """Calculate 24-hour PNL - plain function for APScheduler serialization."""
+    if _pnl_analytics is None:
+        logger.error("PNL analytics not available for 24h PNL job")
+        return
+    
+    try:
+        logger.info("Calculating 24-hour PNL...")
+        pnl = await _pnl_analytics.get_24h_pnl()
+        logger.success(f"24h PNL calculated: {len(pnl.items)} items, total: {pnl.total:.2f}%")
+    except Exception as e:
+        logger.error(f"Failed to calculate 24h PNL: {e}")
+        # Don't re-raise - scheduler should continue running
+
+
+async def calculate_weekly_pnl_job() -> None:
+    """Calculate weekly PNL - plain function for APScheduler serialization."""
+    if _pnl_analytics is None:
+        logger.error("PNL analytics not available for weekly PNL job")
+        return
+    
+    try:
+        logger.info("Calculating weekly PNL...")
+        pnl = await _pnl_analytics.get_weekly_pnl()
+        logger.success(f"Weekly PNL calculated: {len(pnl.items)} items, total: {pnl.total:.2f}%")
+    except Exception as e:
+        logger.error(f"Failed to calculate weekly PNL: {e}")
+        # Don't re-raise - scheduler should continue running
+
+
 class AppScheduler:
     """
     Application scheduler using APScheduler with PostgreSQL persistence.
@@ -55,13 +87,18 @@ class AppScheduler:
     Jobs are persisted in PostgreSQL and survive application restarts.
     """
 
-    def __init__(self, telegram_service: "TelegramService") -> None:
+    def __init__(
+        self,
+        telegram_service: "TelegramService",
+        pnl_analytics: "PnlAnalytics",
+    ) -> None:
         self._telegram_service = telegram_service
+        self._pnl_analytics = pnl_analytics
         self._scheduler: AsyncIOScheduler | None = None
 
     async def start(self) -> None:
         """Initialize and start the scheduler with persistent job store."""
-        global _telegram_service
+        global _telegram_service, _pnl_analytics
 
         if self._scheduler is not None:
             logger.warning("Scheduler is already started")
@@ -69,8 +106,9 @@ class AppScheduler:
 
         logger.info("Starting scheduler...")
 
-        # Set global telegram service reference for job functions
+        # Set global service references for job functions
         _telegram_service = self._telegram_service
+        _pnl_analytics = self._pnl_analytics
 
         # Create synchronous database URL for APScheduler (it doesn't support async drivers)
         sync_db_url = settings.alembic_database_url
@@ -113,7 +151,7 @@ class AppScheduler:
 
     async def stop(self) -> None:
         """Stop the scheduler cleanly."""
-        global _telegram_service
+        global _telegram_service, _pnl_analytics
 
         if self._scheduler is None:
             logger.warning("Scheduler is not running")
@@ -124,8 +162,9 @@ class AppScheduler:
         try:
             self._scheduler.shutdown(wait=True)
             self._scheduler = None
-            # Clear global reference
+            # Clear global references
             _telegram_service = None
+            _pnl_analytics = None
             logger.success("Scheduler stopped successfully")
         except Exception as e:
             logger.error(f"Error stopping scheduler: {e}")
@@ -160,6 +199,27 @@ class AppScheduler:
             id='daily_good_night',
             replace_existing=True,  # Replace existing job on restart
             name='Daily Good Night Message'
+        )
+
+        # 24-hour PNL job - every hour at minute 0
+        self._scheduler.add_job(
+            func=calculate_24h_pnl_job,
+            trigger='cron',
+            minute=0,
+            id='hourly_24h_pnl',
+            replace_existing=True,
+            name='Hourly 24h PNL Calculation'
+        )
+
+        # Weekly PNL job - every 6 hours at minute 0
+        self._scheduler.add_job(
+            func=calculate_weekly_pnl_job,
+            trigger='cron',
+            hour='0,6,12,18',
+            minute=0,
+            id='periodic_weekly_pnl',
+            replace_existing=True,
+            name='Periodic Weekly PNL Calculation'
         )
 
         logger.info("Scheduled jobs registered successfully")

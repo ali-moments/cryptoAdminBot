@@ -37,6 +37,7 @@ from app.engine.tracker import Tracker
 from app.engine.action_processor import ActionProcessor
 from app.market.subscription_manager import SubscriptionManager
 from app.scheduler import AppScheduler
+from app.analytics.pnl import PnlAnalytics
 
 
 @dataclass(slots=True)
@@ -162,8 +163,11 @@ def build_application() -> Application:
 
     reader = TelegramReader(reader_manager)
 
-    # Create scheduler with telegram service
-    scheduler = AppScheduler(telegram_service)
+    # Create analytics components
+    pnl_analytics = PnlAnalytics(UnitOfWork(), price_cache)
+
+    # Create scheduler with telegram service and analytics
+    scheduler = AppScheduler(telegram_service, pnl_analytics)
 
     return Application(
         registry=registry,

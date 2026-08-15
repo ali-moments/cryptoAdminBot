@@ -180,3 +180,55 @@ class TrackingRepository(BaseRepository[Tracking]):
             "std_dev": std_dev,
             "coefficient_of_variation": cv,
         }
+
+    # === PNL-specific queries ===
+    async def get_closed_in_window(
+        self,
+        start: datetime,
+        end: datetime,
+    ) -> list[Tracking]:
+        """Get closed trackings in time window with eager loading for PNL analytics."""
+        stmt = (
+            select(Tracking)
+            .join(Signal)
+            .where(
+                Tracking.closed_at >= start,
+                Tracking.closed_at < end,
+                Tracking.status.in_([TrackingStatus.CLOSED, TrackingStatus.RISK_FREE]),
+            )
+            .options(
+                selectinload(Tracking.signal).selectinload(Signal.source),
+                selectinload(Tracking.signal).selectinload(Signal.entries),
+                selectinload(Tracking.signal).selectinload(Signal.targets),
+                selectinload(Tracking.tp_hits),
+            )
+            .order_by(Tracking.closed_at.desc())
+        )
+
+        result = await self.session.scalars(stmt)
+        return list(result)
+
+    async def get_by_signal_creation_window(
+        self,
+        start: datetime,
+        end: datetime,
+    ) -> list[Tracking]:
+        """Get trackings whose signals were created in the time window."""
+        stmt = (
+            select(Tracking)
+            .join(Signal)
+            .where(
+                Signal.created_at >= start,
+                Signal.created_at < end,
+            )
+            .options(
+                selectinload(Tracking.signal).selectinload(Signal.source),
+                selectinload(Tracking.signal).selectinload(Signal.entries),
+                selectinload(Tracking.signal).selectinload(Signal.targets),
+                selectinload(Tracking.tp_hits),
+            )
+            .order_by(Signal.created_at.desc())
+        )
+        
+        result = await self.session.scalars(stmt)
+        return list(result)
