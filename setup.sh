@@ -131,8 +131,8 @@ fresh_install() {
     run_migrations
     run_seed
 
-    # Create sessions directory if it doesn't exist
-    mkdir -p sessions
+    # Create required directories if they don't exist
+    mkdir -p sessions generated logs
 
     run_qr_login
 

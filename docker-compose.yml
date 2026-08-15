@@ -47,6 +47,7 @@ services:
     volumes:
       - ./sessions:/app/sessions
       - ./generated:/app/generated
+      - ./logs:/app/logs
     depends_on:
       postgres:
         condition: service_healthy

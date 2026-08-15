@@ -27,6 +27,6 @@ COPY . .
 
 RUN uv sync --frozen --no-dev
 
-RUN mkdir -p sessions generated
+RUN mkdir -p sessions generated logs
 
 CMD ["uv", "run", "app/main.py"]
