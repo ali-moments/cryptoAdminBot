@@ -218,7 +218,7 @@ class AppScheduler:
         self._scheduler.add_job(
             func=calculate_weekly_pnl_job,
             trigger='cron',
-            day_of_week='FRIDAY',
+            day_of_week='fri',
             hour=21,
             minute=55,
             id='periodic_weekly_pnl',
