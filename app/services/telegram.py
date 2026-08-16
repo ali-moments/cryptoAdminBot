@@ -8,7 +8,7 @@ from app.services.svg import SvgService
 from app.database.uow import UnitOfWork
 from app.database.models import Signal, TpHit, Tracking
 from app.database.enums import MessageType, EntryMethod, Direction
-from app.telegram.common.dto import PnlDTO, SentMessage, SignalDTO, ProfitShotDTO
+from app.telegram.common.dto import PnlDTO, SignalDTO, ProfitShotDTO
 from app.services.settings import States
 
 
@@ -141,39 +141,38 @@ class TelegramService:
             return entry_low_price - fifth_distance
 
 
-    async def send_signal(self, tracking: Tracking, signal: SignalDTO, uow: UnitOfWork) -> SentMessage | None:
+    async def send_signal(self, tracking: Tracking, signal: SignalDTO, uow: UnitOfWork) -> bool:
         """
-        Sends signal data to channel.
+        Queue signal message for sending
         """
         if not self.states.bot_enabled:
             logger.trace("Bot disabled, skipping signal send")
-            return None
+            return False
 
         text = self._formatter.format_signal(signal)
-        sent_message = await self._sender.send_message(
+        
+        # Queue message instead of sending directly
+        success = await self._sender.queue_message(
             channel_id=self.states.target_channel,
             message=text,
+            signal_id=tracking.signal_id,
+            tracking_id=tracking.id,
+            telegram_message_type=MessageType.SIGNAL.value.value,
         )
-
-        # Store signal message in database
-        if sent_message:
-            await uow.telegram_messages.create(
-                signal_id=tracking.signal_id,
-                tracking_id=tracking.id,
-                type=MessageType.SIGNAL,
-                channel_id=self.states.target_channel,
-                message_id=sent_message.id,
-                reply_to_message_id=None,
-            )
-
-        return sent_message
+        
+        if success:
+            logger.trace(f"Signal queued for {tracking.signal.symbol}")
+        else:
+            logger.warning(f"Failed to queue signal for {tracking.signal.symbol}")
+            
+        return success
 
 
-    async def send_sl_hit(self, tracking: Tracking, loss_percent: str, uow: UnitOfWork) -> SentMessage | None:
-        """Send stop loss hit notification"""
+    async def send_sl_hit(self, tracking: Tracking, loss_percent: str, uow: UnitOfWork) -> bool:
+        """Queue stop loss hit notification"""
         if not self.states.bot_enabled:
             logger.trace("Bot disabled, skipping SL hit send")
-            return None
+            return False
 
         text = self._formatter.format_sl_hit(loss=loss_percent)
 
@@ -183,98 +182,59 @@ class TelegramService:
         if signal_message:
             reply_to_message_id = signal_message.message_id
 
-        sent_message = await self._sender.send_message(
+        # Queue message
+        success = await self._sender.queue_message(
             channel_id=self.states.target_channel,
             message=text,
             reply_to=reply_to_message_id,
+            signal_id=tracking.signal_id,
+            tracking_id=tracking.id,
+            telegram_message_type=MessageType.SIGNAL_CLOSED.value,
         )
 
-        # Store message in database
-        if sent_message:
-            await uow.telegram_messages.create(
-                signal_id=tracking.signal_id,
-                tracking_id=tracking.id,
-                type=MessageType.SIGNAL_CLOSED,
-                channel_id=self.states.target_channel,
-                message_id=sent_message.id,
-                reply_to_message_id=reply_to_message_id,
-            )
-
-        return sent_message
+        return success
 
 
-    async def send_entry_hit(self, tracking: Tracking, entry_type: int, entry_price: str, uow: UnitOfWork, target) -> SentMessage | None:
-        """Send entry hit notification with image"""
+    async def send_entry_hit(self, tracking: Tracking, entry_type: int, entry_price: str, uow: UnitOfWork, target) -> bool:
+        """Queue entry hit notification"""
         if not self.states.bot_enabled:
             logger.trace("Bot disabled, skipping entry hit send")
-            return None
+            return False
 
-        # signal = tracking.signal
-
-        # Format text message
+        # Format message
         avg_entry = self._get_effective_entry_price(tracking=tracking)
         if entry_type == 2:
             text = self._formatter.format_second_entry_hit(target=target, entry=avg_entry)
         else:
             text = self._formatter.format_first_entry_hit()
 
-        # # Generate entry shot image
-        # entry_dto = EntryHitDTO(
-        #     symbol=signal.symbol,
-        #     direction=signal.direction.value,
-        #     leverage=signal.leverage,
-        #     entry_price=entry_price,
-        #     entry_type=entry_type,
-        #     datetime_str=self._tehran_now_str()
-        # )
-
-        # file_path = self._svg.generate_entry_shot(
-        #     pair=entry_dto.symbol,
-        #     direction=entry_dto.direction,
-        #     leverage=entry_dto.leverage,
-        #     entry=self._normalize_number(entry_dto.entry_price),
-        #     datetime_str=entry_dto.datetime_str,
-        # )
-
-        # Get original signal message for reply-to
+        # Get reply-to message
         reply_to_message_id = None
         signal_message = await uow.telegram_messages.signal_message(tracking.signal_id)
         if signal_message:
             reply_to_message_id = signal_message.message_id
 
-        # Send file with caption
-        sent_file = await self._sender.send_message(
+        # Queue message
+        message_type = MessageType.ENTRY1_HIT.value if entry_type == 1 else MessageType.ENTRY2_HIT.value
+        success = await self._sender.queue_message(
             channel_id=self.states.target_channel,
             message=text,
-            #file_path=file_path,
             reply_to=reply_to_message_id,
+            signal_id=tracking.signal_id,
+            tracking_id=tracking.id,
+            telegram_message_type=message_type,
         )
 
-        # # Clean up generated file
-        # self._svg.clear_shot_file(file_path)
-
-        # Store message in database
-        if sent_file:
-            message_type = MessageType.ENTRY1_HIT if entry_type == 1 else MessageType.ENTRY2_HIT
-            await uow.telegram_messages.create(
-                signal_id=tracking.signal_id,
-                tracking_id=tracking.id,
-                type=message_type,
-                channel_id=self.states.target_channel,
-                message_id=sent_file.id,
-                reply_to_message_id=reply_to_message_id,
-            )
-
-        return sent_file
+        return success
 
 
-    async def send_tp_hit(self, tracking: Tracking, tp_hit: TpHit, uow: UnitOfWork) -> SentMessage | None:
+    async def send_tp_hit(self, tracking: Tracking, tp_hit: TpHit, uow: UnitOfWork) -> bool:
         """
-        Sends TP hit image with caption.
+        Queue TP hit message with image
         """
         if not self.states.bot_enabled:
             logger.trace("Bot disabled, skipping TP hit send")
-            return None
+            return False
 
         signal = tracking.signal
 
@@ -313,42 +273,35 @@ class TelegramService:
         if signal_message:
             reply_to_message_id = signal_message.message_id
 
-        # Send file with caption
-        sent_file = await self._sender.send_file(
+        # Queue file
+        success = await self._sender.queue_file(
             channel_id=self.states.target_channel,
             message=caption,
             file_path=file_path,
             reply_to=reply_to_message_id,
+            signal_id=tracking.signal_id,
+            tracking_id=tracking.id,
+            telegram_message_type=MessageType.TARGET_HIT.value,
         )
 
-        # Clean up generated file
+        # Clean up generated file (we can do this immediately since it's copied to queue)
         self._svg.clear_shot_file(file_path)
 
-        # Store message in database
-        if sent_file:
-            await uow.telegram_messages.create(
-                signal_id=tracking.signal_id,
-                tracking_id=tracking.id,
-                type=MessageType.TARGET_HIT,
+        # Queue profit shot message if counter triggers
+        if self._check_shot_counter():
+            await self._sender.queue_message(
                 channel_id=self.states.target_channel,
-                message_id=sent_file.id,
-                reply_to_message_id=reply_to_message_id,
+                message=self._formatter.format_profit_shot(),
             )
 
-            if self._check_shot_counter():
-                await self._sender.send_message(
-                    channel_id=self.states.target_channel,
-                    message=self._formatter.format_profit_shot(),
-                )
-
-        return sent_file
+        return success
 
 
-    async def send_signal_cancelled(self, tracking: Tracking, reason: str, uow: UnitOfWork) -> SentMessage | None:
-        """Send signal cancelled notification"""
+    async def send_signal_cancelled(self, tracking: Tracking, reason: str, uow: UnitOfWork) -> bool:
+        """Queue signal cancelled notification"""
         if not self.states.bot_enabled:
             logger.trace("Bot disabled, skipping signal cancelled send")
-            return None
+            return False
 
         text = f"سیگنال {tracking.signal.symbol} لغو شد\nدلیل: {reason}"
 
@@ -358,30 +311,23 @@ class TelegramService:
         if signal_message:
             reply_to_message_id = signal_message.message_id
 
-        sent_message = await self._sender.send_message(
+        # Queue message
+        success = await self._sender.queue_message(
             channel_id=self.states.target_channel,
             message=text,
             reply_to=reply_to_message_id,
+            signal_id=tracking.signal_id,
+            tracking_id=tracking.id,
+            telegram_message_type=MessageType.SIGNAL_CANCELLED.value,
         )
 
-        # Store message in database
-        if sent_message:
-            await uow.telegram_messages.create(
-                signal_id=tracking.signal_id,
-                tracking_id=tracking.id,
-                type=MessageType.SIGNAL_CANCELLED,
-                channel_id=self.states.target_channel,
-                message_id=sent_message.id,
-                reply_to_message_id=reply_to_message_id,
-            )
+        return success
 
-        return sent_message
-
-    async def send_signal_closed(self, tracking: Tracking, reason: str, uow: UnitOfWork) -> SentMessage | None:
-        """Send signal closed notification for various reasons"""
+    async def send_signal_closed(self, tracking: Tracking, reason: str, uow: UnitOfWork) -> bool:
+        """Queue signal closed notification for various reasons"""
         if not self.states.bot_enabled:
             logger.trace("Bot disabled, skipping signal closed send")
-            return None
+            return False
 
         reason_text = {
             "risk_free": "ریسک فری",
@@ -398,40 +344,33 @@ class TelegramService:
         if signal_message:
             reply_to_message_id = signal_message.message_id
 
-        sent_message = await self._sender.send_message(
+        # Queue message
+        success = await self._sender.queue_message(
             channel_id=self.states.target_channel,
             message=text,
             reply_to=reply_to_message_id,
+            signal_id=tracking.signal_id,
+            tracking_id=tracking.id,
+            telegram_message_type=MessageType.SIGNAL_CLOSED.value,
         )
 
-        # Store message in database
-        if sent_message:
-            await uow.telegram_messages.create(
-                signal_id=tracking.signal_id,
-                tracking_id=tracking.id,
-                type=MessageType.SIGNAL_CLOSED,
-                channel_id=self.states.target_channel,
-                message_id=sent_message.id,
-                reply_to_message_id=reply_to_message_id,
-            )
+        return success
 
-        return sent_message
-
-    async def send_admin_stop_message(self, tracking: Tracking, uow: UnitOfWork) -> SentMessage | None:
+    async def send_admin_stop_message(self, tracking: Tracking, uow: UnitOfWork) -> bool:
         """Send admin stop notification"""
         return await self.send_signal_closed(tracking, "admin_stop", uow)
 
-    async def send_admin_entry_hit(self, tracking: Tracking, entry_position: int, uow: UnitOfWork) -> SentMessage | None:
+    async def send_admin_entry_hit(self, tracking: Tracking, entry_position: int, uow: UnitOfWork) -> bool:
         """Send admin-triggered entry hit notification"""
         if not self.states.bot_enabled:
             logger.trace("Bot disabled, skipping admin entry hit send")
-            return None
+            return False
 
         # Get the entry price
         entries = tracking.signal.entries
         if entry_position < 1 or entry_position > len(entries):
             logger.error(f"Invalid entry position {entry_position} for tracking {tracking.id}")
-            return None
+            return False
 
         entry_price = str(entries[entry_position - 1].price)
         
@@ -446,11 +385,11 @@ class TelegramService:
         # Use existing entry hit method with admin context
         return await self.send_entry_hit(tracking, entry_position, entry_price, uow, target)
 
-    async def send_admin_tp_hit(self, tracking: Tracking, tp_position: int, uow: UnitOfWork) -> SentMessage | None:
+    async def send_admin_tp_hit(self, tracking: Tracking, tp_position: int, uow: UnitOfWork) -> bool:
         """Send admin-triggered TP hit notification"""
         if not self.states.bot_enabled:
             logger.trace("Bot disabled, skipping admin TP hit send")
-            return None
+            return False
 
         # Get the TP hit record that was created
         tp_hit = None
@@ -459,18 +398,18 @@ class TelegramService:
 
         if not tp_hit:
             logger.error(f"TP hit record not found for tracking {tracking.id}, position {tp_position}")
-            return None
+            return False
 
         # Use existing TP hit method
         return await self.send_tp_hit(tracking, tp_hit, uow)
 
-    async def send_pnl(self, pnldto: PnlDTO):
+    async def send_pnl(self, pnldto: PnlDTO) -> bool:
         """
-        format and send telegram pnl message
+        Queue telegram pnl message
         """
         if not self.states.bot_enabled:
             logger.trace("Bot disabled, skipping PnL send")
-            return None
+            return False
 
         reply_to = None
         top_tp = 0
@@ -484,35 +423,43 @@ class TelegramService:
                     continue
 
         text = self._formatter.format_pnl(pnldto, self.states.target_channel)
-        sent_message = await self._sender.send_message(
+        
+        # Queue message
+        success = await self._sender.queue_message(
             channel_id=self.states.target_channel,
             message=text,
             reply_to=reply_to,
         )
-        return sent_message
+        return success
 
 
-    async def send_good_morning(self) -> SentMessage | None:
+    async def send_good_morning(self) -> bool:
         if not self.states.bot_enabled:
             logger.trace("Bot disabled, skipping good morning send")
-            return None
+            return False
 
         text = self._formatter.format_good_morning()
-        sent_message = await self._sender.send_message(
+        
+        # Queue message
+        success = await self._sender.queue_message(
             channel_id=self.states.target_channel,
             message=text,
+            telegram_message_type=MessageType.DAILY_REPORT.value,
         )
-        return sent_message
+        return success
 
 
-    async def send_good_night(self) -> SentMessage | None:
+    async def send_good_night(self) -> bool:
         if not self.states.bot_enabled:
             logger.trace("Bot disabled, skipping good night send")
-            return None
+            return False
 
         text = self._formatter.format_good_night()
-        sent_message = await self._sender.send_message(
+        
+        # Queue message
+        success = await self._sender.queue_message(
             channel_id=self.states.target_channel,
             message=text,
+            telegram_message_type=MessageType.DAILY_REPORT.value,
         )
-        return sent_message
+        return success

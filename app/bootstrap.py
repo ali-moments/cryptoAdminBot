@@ -100,7 +100,7 @@ def build_application() -> Application:
 
     # Create TelegramService components first
     svg_service = SvgService()
-    tg_sender = TelegramSender()
+    tg_sender = TelegramSender(uow_factory=UnitOfWork)
     tg_formatter = TelegramFormatter()
     telegram_service = TelegramService(
         sender=tg_sender,

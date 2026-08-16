@@ -7,6 +7,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
     DateTime,
     ForeignKey,
     SmallInteger,
@@ -458,6 +459,28 @@ class TelegramMessage(UUIDMixin, TimestampMixin, Base):
             "message_id",
         ),
     )
+
+
+# ======================================================================
+
+class TelegramMessageQueue(IDMixin, TimestampMixin, Base):
+    __tablename__ = "telegram_message_queue"
+
+    channel_id: Mapped[int] = mapped_column(BigInteger)
+    message: Mapped[str] = mapped_column(Text)
+    reply_to: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    file_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    message_type: Mapped[str] = mapped_column(String(10))  # 'text' or 'file'
+    
+    # Queue management
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # 'pending', 'processing', 'completed', 'failed'
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    max_retries: Mapped[int] = mapped_column(Integer, default=3)
+    
+    # Metadata for telegram_messages table update
+    signal_id: Mapped[int | None] = mapped_column(ForeignKey("signals.id", ondelete="CASCADE"), nullable=True)
+    tracking_id: Mapped[int | None] = mapped_column(ForeignKey("trackings.id", ondelete="CASCADE"), nullable=True)
+    telegram_message_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
 
 # ======================================================================

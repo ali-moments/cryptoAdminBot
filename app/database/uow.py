@@ -7,6 +7,7 @@ from app.repositories.signal_entry import SignalEntryRepository
 from app.repositories.signal_target import SignalTargetRepository
 from app.repositories.signal_source import SourceRepository
 from app.repositories.telegram import TelegramRepository
+from app.repositories.telegram_queue import TelegramQueueRepository
 from app.repositories.tp_hit import TpHitRepository
 from app.repositories.tracking import TrackingRepository
 
@@ -21,6 +22,7 @@ class UnitOfWork:
         self.trackings: TrackingRepository
         self.tp_hits: TpHitRepository
         self.telegram_messages: TelegramRepository
+        self.telegram_queue: TelegramQueueRepository
         self.audit_logs: AuditRepository
         self.signal_sources: SourceRepository
 
@@ -33,6 +35,7 @@ class UnitOfWork:
         self.trackings = TrackingRepository(self.session)
         self.tp_hits = TpHitRepository(self.session)
         self.telegram_messages = TelegramRepository(self.session)
+        self.telegram_queue = TelegramQueueRepository(self.session)
         self.audit_logs = AuditRepository(self.session)
         self.signal_sources = SourceRepository(self.session)
 
