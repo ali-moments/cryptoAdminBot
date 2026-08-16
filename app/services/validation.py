@@ -28,6 +28,11 @@ class ValidationService:
             logger.trace("signal structure is not valid.")
             return None
 
+        # Check if stop loss has issues and needs to be recalculated
+        if not self._is_stop_loss_valid(signal):
+            logger.info("Stop loss has issues, calculating automatically...")
+            signal = self._calculate_stop_loss(signal)
+
         if not self._validate_prices(signal):
             logger.trace("signal prices is not valid.")
             return None
@@ -77,6 +82,66 @@ class ValidationService:
             return False
 
         return True
+
+    def _is_stop_loss_valid(self, signal: ParsedSignal) -> bool:
+        """Check if the stop loss is valid according to direction and price relationships."""
+        if signal.stop_loss <= 0:
+            return False
+
+        entries = [entry.price for entry in signal.entries]
+        sl = signal.stop_loss
+
+        if signal.direction is Direction.LONG:
+            # For LONG: stop loss should be below entries
+            if sl >= min(entries):
+                return False
+        else:
+            # For SHORT: stop loss should be above entries
+            if sl <= max(entries):
+                return False
+
+        return True
+
+    def _calculate_stop_loss(self, signal: ParsedSignal) -> ParsedSignal:
+        """Calculate stop loss as 3 times the difference between entry1 and tp1."""
+        if not signal.entries or not signal.targets:
+            logger.warning("Cannot calculate stop loss: missing entries or targets")
+            return signal
+
+        entry1_price = signal.entries[0].price  # First entry
+        tp1_price = signal.targets[0].price     # First target
+
+        # Calculate the difference between entry1 and tp1
+        entry_tp_diff = abs(tp1_price - entry1_price)
+
+        # Calculate stop loss as 3 times this difference
+        stop_loss_distance = entry_tp_diff * 3
+
+        if signal.direction is Direction.LONG:
+            # For LONG: stop loss is below entry1
+            calculated_sl = entry1_price - stop_loss_distance
+        else:
+            # For SHORT: stop loss is above entry1
+            calculated_sl = entry1_price + stop_loss_distance
+
+        # Ensure stop loss is positive
+        calculated_sl = max(Decimal('0.00000001'), calculated_sl)
+
+        logger.info(
+            f"Calculated stop loss for {signal.symbol}: "
+            f"Entry1={entry1_price}, TP1={tp1_price}, "
+            f"Diff={entry_tp_diff}, SL={calculated_sl}"
+        )
+
+        # Create a new ParsedSignal with the calculated stop loss
+        return ParsedSignal(
+            symbol=signal.symbol,
+            direction=signal.direction,
+            leverage=signal.leverage,
+            entries=signal.entries,
+            targets=signal.targets,
+            stop_loss=calculated_sl,
+        )
 
     def _validate_prices(
         self,
