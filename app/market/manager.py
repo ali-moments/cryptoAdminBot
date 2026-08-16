@@ -1,4 +1,5 @@
 import asyncio
+import aiohttp
 from loguru import logger
 
 from app.database.enums import Provider
@@ -12,16 +13,20 @@ from app.market.providers.base import BaseProvider
 class ProviderManager:
     """
     Manages market data providers with automatic failover and recovery.
+    
+    Supports per-symbol provider selection: symbols can be distributed across
+    multiple providers simultaneously. If a symbol is unavailable on the primary
+    provider, it will automatically be routed to an available fallback provider.
 
     Failover hierarchy:
-    1. Primary (Binance) - main provider
-    2. Fallback (Bybit) - used when primary fails
+    1. Primary (Binance) - preferred provider
+    2. Fallback (Bybit) - used when primary fails or doesn't support a symbol
     3. Disaster (OKX) - used when both primary and fallback fail
 
     Recovery strategy:
     - Always attempts to reconnect to primary (Binance)
-    - When primary recovers, switches back automatically
-    - Transfers all subscriptions during provider switch
+    - Provider-level failures trigger failover for affected symbols only
+    - Symbols on other providers remain unaffected during failover
     """
 
     # Reconnection settings
@@ -51,6 +56,12 @@ class ProviderManager:
 
         # Track subscriptions (symbol -> reference count)
         self._subscriptions: dict[str, int] = {}
+        
+        # NEW: Track which provider owns which symbol
+        self._symbol_providers: dict[str, Provider] = {}
+        
+        # NEW: Protect concurrent subscription modifications
+        self._sync_lock = asyncio.Lock()
 
         # Background tasks
         self._health_check_task: asyncio.Task | None = None
@@ -146,34 +157,92 @@ class ProviderManager:
         self,
         symbol: str,
     ) -> None:
-        """Subscribe to a symbol. Uses reference counting for multiple subscriptions."""
-        count = self._subscriptions.get(symbol, 0)
-
-        if count == 0:
-            # First subscription to this symbol
-            await self.active_provider.subscribe(symbol)
-            logger.debug(f"Subscribed to {symbol} on {self._active.value}")
-
-        self._subscriptions[symbol] = count + 1
+        """Subscribe to a symbol. Uses reference counting for multiple subscriptions.
+        
+        Routes symbols to providers intelligently:
+        - First checks if symbol already has an assigned provider
+        - If not, tries providers in preference order (primary first)
+        - Automatically falls back if primary doesn't support the symbol
+        """
+        async with self._sync_lock:
+            count = self._subscriptions.get(symbol, 0)
+            
+            if count == 0:
+                # First subscription - route to appropriate provider
+                if symbol in self._symbol_providers:
+                    # Symbol already has an assigned provider (e.g., from previous subscription)
+                    provider_enum = self._symbol_providers[symbol]
+                    provider = self._providers[provider_enum]
+                    
+                    if provider.is_connected:
+                        try:
+                            await provider.subscribe(symbol)
+                            logger.debug(f"Subscribed {symbol} to existing provider {provider_enum.value}")
+                        except Exception as e:
+                            logger.error(f"Failed to subscribe {symbol} to {provider_enum.value}: {e}")
+                            # Provider failed, try others
+                            del self._symbol_providers[symbol]
+                            # Release lock before network I/O in helper
+                            self._sync_lock.release()
+                            try:
+                                if not await self._try_subscribe_symbol(symbol):
+                                    raise RuntimeError(f"No provider supports {symbol}")
+                            finally:
+                                await self._sync_lock.acquire()
+                    else:
+                        # Assigned provider is disconnected, reassign
+                        logger.warning(f"Assigned provider {provider_enum.value} for {symbol} is disconnected, reassigning")
+                        del self._symbol_providers[symbol]
+                        # Release lock before network I/O in helper
+                        self._sync_lock.release()
+                        try:
+                            if not await self._try_subscribe_symbol(symbol):
+                                raise RuntimeError(f"No provider supports {symbol}")
+                        finally:
+                            await self._sync_lock.acquire()
+                else:
+                    # New symbol - try providers in preference order
+                    # Release lock before network I/O in helper
+                    self._sync_lock.release()
+                    try:
+                        if not await self._try_subscribe_symbol(symbol, preferred_provider=self._active):
+                            raise RuntimeError(f"No provider supports {symbol}")
+                    finally:
+                        await self._sync_lock.acquire()
+            
+            self._subscriptions[symbol] = count + 1
 
     async def unsubscribe(
         self,
         symbol: str,
     ) -> None:
-        """Unsubscribe from a symbol. Uses reference counting."""
-        count = self._subscriptions.get(symbol)
-
-        if count is None:
-            return
-
-        if count == 1:
-            # Last subscription to this symbol
-            await self.active_provider.unsubscribe(symbol)
-            del self._subscriptions[symbol]
-            logger.debug(f"Unsubscribed from {symbol} on {self._active.value}")
-            return
-
-        self._subscriptions[symbol] = count - 1
+        """Unsubscribe from a symbol. Uses reference counting.
+        
+        Unsubscribes from the specific provider that owns this symbol.
+        """
+        async with self._sync_lock:
+            count = self._subscriptions.get(symbol)
+            
+            if count is None:
+                return
+            
+            if count == 1:
+                # Last subscription - actually unsubscribe from owning provider
+                provider_enum = self._symbol_providers.get(symbol)
+                if provider_enum:
+                    provider = self._providers[provider_enum]
+                    try:
+                        await provider.unsubscribe(symbol)
+                        logger.debug(f"Unsubscribed {symbol} from {provider_enum.value}")
+                    except Exception as e:
+                        logger.error(f"Failed to unsubscribe {symbol} from {provider_enum.value}: {e}")
+                    
+                    del self._symbol_providers[symbol]
+                
+                del self._subscriptions[symbol]
+                return
+            
+            self._subscriptions[symbol] = count - 1
 
     async def sync(self, required_symbols: set[str]) -> None:
         """Synchronize current subscriptions with required symbol set.
@@ -191,17 +260,18 @@ class ProviderManager:
             logger.warning("Cannot sync subscriptions: ProviderManager not running")
             return
 
-        # Get current subscriptions
-        current_symbols = set(self._subscriptions.keys())
-
+        # Get current subscriptions under lock
+        async with self._sync_lock:
+            current_symbols = set(self._subscriptions.keys())
+        
         # Calculate differences
         missing_symbols = required_symbols - current_symbols
         unused_symbols = current_symbols - required_symbols
 
-        # Log sync operation with provider context
+        # Log sync operation
         if missing_symbols or unused_symbols:
             logger.info(
-                f"SUBSCRIPTION SYNC [{self._active.value}]: +{len(missing_symbols)} -{len(unused_symbols)} "
+                f"SUBSCRIPTION SYNC: +{len(missing_symbols)} -{len(unused_symbols)} "
                 f"(current: {len(current_symbols)}, required: {len(required_symbols)})"
             )
 
@@ -209,27 +279,28 @@ class ProviderManager:
                 logger.debug(f"Subscribing to: {sorted(missing_symbols)}")
             if unused_symbols:
                 logger.debug(f"Unsubscribing from: {sorted(unused_symbols)}")
-        # else:
-        #     logger.debug(f"SUBSCRIPTION SYNC [{self._active.value}]: No changes needed (current: {len(current_symbols)} symbols)")
 
-        # Subscribe to missing symbols
+        # Release lock before network I/O
+        # Subscribe to missing symbols (uses subscribe() which handles locking internally)
         for symbol in missing_symbols:
             try:
                 await self.subscribe(symbol)
-                logger.debug(f"✓ Subscribed to {symbol}")
+                logger.debug(f"✓ Subscribed {symbol}")
             except Exception as e:
-                logger.error(f"✗ Failed to subscribe to {symbol}: {e}")
+                logger.error(f"✗ Failed to subscribe {symbol}: {e}")
 
         # Unsubscribe from unused symbols
         for symbol in unused_symbols:
             try:
                 await self.unsubscribe(symbol)
-                logger.debug(f"✓ Unsubscribed from {symbol}")
+                logger.debug(f"✓ Unsubscribed {symbol}")
             except Exception as e:
-                logger.error(f"✗ Failed to unsubscribe from {symbol}: {e}")
+                logger.error(f"✗ Failed to unsubscribe {symbol}: {e}")
 
         # Final state check
-        final_symbols = set(self._subscriptions.keys())
+        async with self._sync_lock:
+            final_symbols = set(self._subscriptions.keys())
+        
         if final_symbols != required_symbols:
             missing_after = required_symbols - final_symbols
             extra_after = final_symbols - required_symbols
@@ -243,6 +314,73 @@ class ProviderManager:
     ) -> PriceTick | None:
         """Get the latest price for a symbol from the cache."""
         return self._cache.get(symbol)
+
+    async def _try_subscribe_symbol(
+        self,
+        symbol: str,
+        preferred_provider: Provider | None = None
+    ) -> bool:
+        """Try to subscribe symbol to a provider, trying multiple providers if needed.
+        
+        Returns True if successful, False if no provider supports this symbol.
+        
+        This method should be called WITHOUT holding self._sync_lock to avoid
+        blocking during network I/O. It updates self._symbol_providers when successful.
+        """
+        # Determine provider order
+        if preferred_provider and preferred_provider in self._providers:
+            providers_to_try = [preferred_provider, self._primary, self._fallback, self._disaster]
+        else:
+            providers_to_try = [self._primary, self._fallback, self._disaster]
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        providers_to_try = [
+            p for p in providers_to_try
+            if p not in seen and not seen.add(p)
+        ]
+        
+        for provider_enum in providers_to_try:
+            provider = self._providers[provider_enum]
+            
+            # Skip disconnected providers
+            if not provider.is_connected:
+                logger.debug(f"{provider_enum.value} not connected, skipping for {symbol}")
+                continue
+            
+            # Check if provider supports symbol using REST API
+            try:
+                await provider.current_price(symbol)
+                # Symbol exists on this provider
+                logger.debug(f"{provider_enum.value} supports {symbol}")
+            except aiohttp.ClientResponseError as e:
+                if e.status == 400:
+                    # Bad symbol - provider doesn't support it
+                    logger.debug(f"{provider_enum.value} does not support {symbol} (HTTP 400)")
+                    continue
+                else:
+                    # Other HTTP error - provider might be having issues
+                    logger.warning(f"{provider_enum.value} API error checking {symbol}: HTTP {e.status}")
+                    continue
+            except Exception as e:
+                logger.warning(f"{provider_enum.value} failed availability check for {symbol}: {e}")
+                continue
+            
+            # Try to subscribe via WebSocket
+            try:
+                await provider.subscribe(symbol)
+                # Update mapping under lock
+                async with self._sync_lock:
+                    self._symbol_providers[symbol] = provider_enum
+                logger.info(f"✓ Subscribed {symbol} to {provider_enum.value}")
+                return True
+            except Exception as e:
+                logger.warning(f"✗ Failed to subscribe {symbol} to {provider_enum.value}: {e}")
+                continue
+        
+        # No provider could subscribe this symbol
+        logger.error(f"✗ No provider supports {symbol}")
+        return False
 
     async def _try_connect(self, provider: Provider) -> bool:
         """Try to connect to a provider. Returns True if successful."""
@@ -287,59 +425,85 @@ class ProviderManager:
             logger.error(f"Error disconnecting from {provider.value}: {e}")
 
     async def _switch_provider(self, new_provider: Provider) -> bool:
+        """Switch provider for connection-level failure.
+        
+        Only transfers symbols from the failed provider.
+        Symbols on other providers remain untouched.
         """
-        Switch from current provider to a new one.
-        Transfers all subscriptions to the new provider.
-        """
-        if new_provider == self._active:
-            return True
-
         old_provider = self._active
-
+        
+        if new_provider == old_provider:
+            return True
+        
         logger.info(f"Switching from {old_provider.value} to {new_provider.value}")
-
-        # Save current subscriptions before switching
-        subscriptions_to_transfer = dict(self._subscriptions)
-
-        # Connect to new provider (this sets self._active = new_provider)
+        
+        # Identify which symbols need to move (only those on failed provider)
+        async with self._sync_lock:
+            symbols_to_transfer = [
+                symbol for symbol, provider in self._symbol_providers.items()
+                if provider == old_provider
+            ]
+        
+        if not symbols_to_transfer:
+            logger.info("No symbols to transfer (no symbols on failed provider)")
+            # Still update _active for default provider selection
+            self._active = new_provider
+            return True
+        
+        # Connect to new provider
         if not await self._try_connect(new_provider):
-            logger.error(f"Failed to switch to {new_provider.value}")
+            logger.error(f"Failed to connect to {new_provider.value}")
             return False
-
-        # Clear ProviderManager subscription state - it will be rebuilt during transfer
-        self._subscriptions.clear()
-
-        # Transfer subscriptions to the new provider
-        if subscriptions_to_transfer:
-            logger.info(f"Transferring {len(subscriptions_to_transfer)} subscriptions to {new_provider.value}")
-
-            failed_subscriptions = []
-            for symbol, count in subscriptions_to_transfer.items():
-                try:
-                    # Subscribe once on the new provider - subscribe() method handles reference counting
-                    await self.active_provider.subscribe(symbol)
-                    # Restore the reference count in our state
-                    self._subscriptions[symbol] = count
-                    logger.debug(f"Transferred {symbol} to {new_provider.value} (ref count: {count})")
-                except Exception as e:
-                    logger.error(f"Failed to transfer {symbol} to {new_provider.value}: {e}")
-                    failed_subscriptions.append(symbol)
-
-            if failed_subscriptions:
-                logger.warning(f"Failed to transfer {len(failed_subscriptions)} subscriptions: {failed_subscriptions}")
-
+        
+        # Transfer affected symbols
+        logger.info(f"Transferring {len(symbols_to_transfer)} symbols from {old_provider.value} to {new_provider.value}")
+        failed_transfers = []
+        
+        for symbol in symbols_to_transfer:
+            # Get reference count before removal
+            async with self._sync_lock:
+                ref_count = self._subscriptions.get(symbol, 0)
+            
+            if ref_count == 0:
+                continue
+            
+            # Unsubscribe from old provider (best effort)
+            try:
+                old_provider_instance = self._providers[old_provider]
+                await old_provider_instance.unsubscribe(symbol)
+            except Exception as e:
+                logger.warning(f"Failed to unsubscribe {symbol} from {old_provider.value}: {e}")
+            
+            # Subscribe to new provider
+            new_provider_instance = self._providers[new_provider]
+            try:
+                await new_provider_instance.subscribe(symbol)
+                async with self._sync_lock:
+                    self._symbol_providers[symbol] = new_provider
+                logger.debug(f"✓ Transferred {symbol} to {new_provider.value}")
+            except Exception as e:
+                logger.error(f"✗ Failed to transfer {symbol} to {new_provider.value}: {e}")
+                failed_transfers.append(symbol)
+                # Remove from mapping - will be retried in next sync cycle
+                async with self._sync_lock:
+                    if symbol in self._symbol_providers:
+                        del self._symbol_providers[symbol]
+        
+        if failed_transfers:
+            logger.warning(f"Failed to transfer {len(failed_transfers)} symbols: {failed_transfers}")
+        
+        # Update active provider
+        self._active = new_provider
+        
         # Disconnect old provider
         await self._disconnect_provider(old_provider)
-
-        # Publish provider changed event
+        
+        # Publish event
         await self._dispatcher.publish(
-            ProviderChangedEvent(
-                previous=old_provider,
-                current=new_provider,
-            )
+            ProviderChangedEvent(previous=old_provider, current=new_provider)
         )
-
-        logger.success(f"Switched to {new_provider.value} with {len(self._subscriptions)} active subscriptions")
+        
+        logger.success(f"Switched to {new_provider.value}")
         return True
 
     async def _health_check_loop(self) -> None:
