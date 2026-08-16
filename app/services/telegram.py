@@ -284,8 +284,7 @@ class TelegramService:
             telegram_message_type=MessageType.TARGET_HIT.value,
         )
 
-        # Clean up generated file (we can do this immediately since it's copied to queue)
-        self._svg.clear_shot_file(file_path)
+        # Don't clean up file here - let queue processor handle it after sending
 
         # Queue profit shot message if counter triggers
         if self._check_shot_counter():

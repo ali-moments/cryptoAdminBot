@@ -142,6 +142,15 @@ class TelegramSender:
                 )
                 
             if sent_message:
+                # Clean up temporary files after successful sending
+                if queue_item.message_type == "file" and queue_item.file_path:
+                    try:
+                        if os.path.exists(queue_item.file_path):
+                            os.remove(queue_item.file_path)
+                            logger.trace(f"Cleaned up temporary file: {queue_item.file_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to cleanup file {queue_item.file_path}: {e}")
+                
                 # Update telegram_messages table
                 if queue_item.telegram_message_type and queue_item.signal_id:
                     # Convert string back to MessageType enum for telegram_messages table
@@ -162,9 +171,26 @@ class TelegramSender:
                 logger.trace(f"Message sent and recorded: {sent_message.id}")
             else:
                 # Handle failure
+                logger.warning(f"Failed to send message from queue item {queue_item.id}")
+                
+                # Clean up temporary files even on failure to avoid accumulating files
+                if queue_item.message_type == "file" and queue_item.file_path:
+                    try:
+                        if os.path.exists(queue_item.file_path):
+                            os.remove(queue_item.file_path)
+                            logger.trace(f"Cleaned up temporary file after failure: {queue_item.file_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to cleanup file {queue_item.file_path}: {e}")
+                
                 if queue_item.retry_count < queue_item.max_retries:
-                    # Reset to pending for retry
-                    await uow.telegram_queue.reset_for_retry(queue_item.id)
+                    # Reset to pending for retry (but without the file for file messages)
+                    if queue_item.message_type == "file":
+                        # For file messages, mark as failed since file is now gone
+                        await uow.telegram_queue.mark_failed(queue_item.id)
+                        logger.warning(f"File message {queue_item.id} marked as failed - file no longer exists for retry")
+                    else:
+                        # For text messages, can safely retry
+                        await uow.telegram_queue.reset_for_retry(queue_item.id)
                 else:
                     await uow.telegram_queue.mark_failed(queue_item.id)
                 await uow.commit()
