@@ -93,7 +93,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE, adm
             f"⚙️ Mode: {'🟡 Development' if bot_status['dev_mode'] else '🟢 Production'}\n"
             f"📋 Sources: {stats['active_sources_count']}/{stats['total_sources_count']} active\n"
             f"🎯 Active Trackings: {stats['active_trackings_count']}\n"
-            f"📊 Signals Limit: {stats['signals_limit']}\n"
+            #f"📊 Signals Limit: {stats['signals_limit']}\n"
             f"📺 Target Channel: {bot_status['target_channel']}"
         )
         
@@ -225,7 +225,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, adm
             f"{mode_emoji} Mode: {'Development' if bot_status['dev_mode'] else 'Production'}\n"
             f"📋 Sources: {stats['active_sources_count']}/{stats['total_sources_count']} active\n"
             f"🎯 Active Trackings: {stats['active_trackings_count']}\n"
-            f"📊 Signals Limit: {stats['signals_limit']}"
+            #f"📊 Signals Limit: {stats['signals_limit']}"
         )
         
         if edit and update.callback_query:
