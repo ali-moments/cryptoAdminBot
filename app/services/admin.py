@@ -275,6 +275,8 @@ class AdminService:
 
     async def send_tp_hit(self, tracking_id: int, tp_position: int) -> dict:
         """Trigger TP hit: update highest_target_hit, send TP message."""
+        logger.info(f"Admin TP hit request: tracking_id={tracking_id}, tp_position={tp_position}")
+        
         async with self._uow_factory() as uow:
             tracking = await uow.trackings.get_full(tracking_id)
             if not tracking:
@@ -283,10 +285,16 @@ class AdminService:
             if not tracking.is_active:
                 return {"success": False, "message": "Tracking not active"}
 
+            # Debug tracking state
+            logger.info(f"Tracking {tracking_id} state: symbol={tracking.signal.symbol}, direction={tracking.signal.direction.value}, actual_entry_price={tracking.actual_entry_price}, entry1_touched={tracking.entry1_touched}, entry2_touched={tracking.entry2_touched}")
+            logger.info(f"Signal entries: {[f'${entry.price}' for entry in tracking.signal.entries]}")
+
             # Validate TP position
             targets = tracking.signal.targets
             if tp_position < 1 or tp_position > len(targets):
                 return {"success": False, "message": f"Invalid TP position: {tp_position}"}
+
+            logger.info(f"Signal targets: {[f'TP{i+1}=${target.price}' for i, target in enumerate(targets)]}")
 
             # Check if TP already hit
             if tracking.highest_target_hit >= tp_position:
@@ -303,14 +311,20 @@ class AdminService:
                 
                 # Calculate profit percentage
                 profit_percent = self._calculate_profit_percentage(tracking, target_price)
+                logger.info(f"Admin TP hit: Creating TpHit record with profit_percent={profit_percent}")
                 
-                await uow.tp_hits.create(
+                tp_hit = await uow.tp_hits.create(
                     tracking_id=tracking_id,
                     position=tp_position,
                     price=target_price,
                     profit_percent=profit_percent,
                     hit_at=datetime.now(UTC),
                 )
+                
+                # Verify the profit percentage was saved correctly
+                logger.info(f"TpHit record created - ID: {tp_hit.id if hasattr(tp_hit, 'id') else 'N/A'}, profit_percent: {tp_hit.profit_percent if hasattr(tp_hit, 'profit_percent') else 'N/A'}")
+            else:
+                logger.info(f"TpHit record already exists for tracking {tracking_id} position {tp_position}")
 
             # Add admin audit log
             await uow.audit_logs.create(
@@ -468,20 +482,17 @@ class AdminService:
 
     def _calculate_profit_percentage(self, tracking: "Tracking", target_price: Decimal) -> Decimal:
         """Calculate profit percentage for a TP hit based on entry and target price."""
-        # Get effective entry price (could be average if both entries touched)
-        effective_entry_price = self._get_effective_entry_price(tracking)
-        
-        if not effective_entry_price or effective_entry_price == 0:
-            # If no entry price available, estimate using signal entries for admin TP
-            signal_entries = tracking.signal.entries
-            if signal_entries:
-                # Use the first entry as a fallback for calculation
-                effective_entry_price = signal_entries[0].price
-            else:
-                return Decimal("0")
-        
         signal = tracking.signal
         direction = signal.direction
+        
+        # Get effective entry price for calculation
+        effective_entry_price = self._get_effective_entry_price_for_admin(tracking)
+        
+        if not effective_entry_price or effective_entry_price == 0:
+            logger.warning(f"Could not determine entry price for tracking {tracking.id}, using 0% profit")
+            return Decimal("0")
+        
+        logger.info(f"Calculating profit for tracking {tracking.id}: entry=${effective_entry_price}, target=${target_price}, direction={direction.value}")
         
         # Calculate profit percentage based on direction
         if direction == Direction.LONG:
@@ -491,7 +502,29 @@ class AdminService:
             # For SHORT: profit = (entry_price - target_price) / entry_price * 100
             profit_percent = ((effective_entry_price - target_price) / effective_entry_price) * Decimal("100")
         
-        return profit_percent.quantize(Decimal("0.01"))  # Round to 2 decimal places
+        result = profit_percent.quantize(Decimal("0.01"))  # Round to 2 decimal places
+        logger.info(f"Calculated profit percentage: {result}%")
+        return result
+    
+    def _get_effective_entry_price_for_admin(self, tracking: "Tracking") -> Decimal | None:
+        """Get effective entry price for admin profit calculations (includes fallbacks)."""
+        # First try to get actual effective entry price if tracking has entered
+        if tracking.actual_entry_price:
+            effective_price = self._get_effective_entry_price(tracking)
+            if effective_price:
+                logger.info(f"Using actual entry price for tracking {tracking.id}: ${effective_price}")
+                return effective_price
+        
+        # Fallback: Use signal entries for estimation (for admin TP on WAITING_ENTRY trackings)
+        signal_entries = tracking.signal.entries
+        if signal_entries:
+            # For admin TP calculations, use first entry as estimate
+            entry_price = signal_entries[0].price
+            logger.info(f"Using signal entry price estimate for tracking {tracking.id}: ${entry_price}")
+            return entry_price
+        
+        logger.error(f"No entry price available for tracking {tracking.id}")
+        return None
     
     def _get_effective_entry_price(self, tracking: "Tracking") -> Decimal | None:
         """Get effective entry price for profit calculations."""
@@ -507,10 +540,6 @@ class AdminService:
                 entry2_price = signal_entries[1].price
                 avg_entry = (entry1_price + entry2_price) / Decimal("2")
                 return avg_entry.quantize(Decimal("0.00000001"))
-        elif tracking.entry1_touched and tracking.entry_method and tracking.entry_method.value == "EMERGENCY_ENTRY":
-            # Both emergency and entry1 touched - simplified calculation
-            # For admin purposes, we'll use the actual_entry_price
-            pass
 
         # Otherwise, use the actual entry price
         return tracking.actual_entry_price
