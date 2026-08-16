@@ -237,7 +237,7 @@ class AdminService:
             tracking.status = TrackingStatus.CLOSED
             tracking.is_active = False
             tracking.closed_at = current_time
-            tracking.close_reason = CloseReason.ADMIN_STOP
+            tracking.close_reason = CloseReason.CANCELLED
 
             # Add admin audit log
             await uow.audit_logs.create(
