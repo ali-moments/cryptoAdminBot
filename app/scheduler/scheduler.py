@@ -7,6 +7,8 @@ from apscheduler.executors.asyncio import AsyncIOExecutor
 from loguru import logger
 
 from app.config.settings import settings
+from app.database.uow import UnitOfWork
+from app.services.scoring_integration import ScoringIntegrationService
 
 if TYPE_CHECKING:
     from app.services.telegram import TelegramService
@@ -16,6 +18,7 @@ if TYPE_CHECKING:
 # Global references for job functions
 _telegram_service: "TelegramService | None" = None
 _pnl_analytics: "PnlAnalytics | None" = None
+_scoring_integration_service: "ScoringIntegrationService | None" = None
 
 
 async def good_morning_job() -> None:
@@ -80,6 +83,51 @@ async def calculate_weekly_pnl_job() -> None:
         # Don't re-raise - scheduler should continue running
 
 
+async def update_all_scores_and_analytics_job() -> None:
+    """Update all signal source scores and analytics - plain function for APScheduler serialization."""
+    if _scoring_integration_service is None:
+        logger.error("Scoring integration service not available for score and analytics update job")
+        return
+
+    try:
+        logger.info("Starting scheduled score and analytics update for all sources...")
+        
+        # Update all source scores using all-time data
+        results = await _scoring_integration_service.update_all_source_scores_and_statistics(
+            time_window=None,  # Use all-time data
+            batch_size=10,     # Process 10 sources at a time
+        )
+        
+        # Log detailed results
+        total = results["total_sources"]
+        successful = results["successful_updates"]
+        failed = results["failed_updates"]
+        skipped = results["skipped_sources"]
+        statistics_updated = results.get("statistics_updated", 0)
+        
+        logger.success(
+            f"Score and analytics update completed: {successful}/{total} sources updated successfully"
+        )
+        
+        if statistics_updated > 0:
+            logger.info(f"{statistics_updated} sources had their analytics statistics updated")
+        
+        if failed > 0:
+            logger.warning(f"{failed} sources failed to update")
+            
+        if skipped > 0:
+            logger.info(f"{skipped} sources were skipped")
+            
+        # Log summary statistics
+        if total > 0:
+            success_rate = (successful / total) * 100
+            logger.info(f"Score and analytics update summary: {success_rate:.1f}% success rate")
+                
+    except Exception as e:
+        logger.error(f"Failed to update source scores and analytics: {e}")
+        # Don't re-raise - scheduler should continue running
+
+
 class AppScheduler:
     """
     Application scheduler using APScheduler with PostgreSQL persistence.
@@ -99,7 +147,7 @@ class AppScheduler:
 
     async def start(self) -> None:
         """Initialize and start the scheduler with persistent job store."""
-        global _telegram_service, _pnl_analytics
+        global _telegram_service, _pnl_analytics, _scoring_integration_service
 
         if self._scheduler is not None:
             logger.warning("Scheduler is already started")
@@ -110,6 +158,10 @@ class AppScheduler:
         # Set global service references for job functions
         _telegram_service = self._telegram_service
         _pnl_analytics = self._pnl_analytics
+        
+        # Initialize scoring integration service
+        uow = UnitOfWork()
+        _scoring_integration_service = ScoringIntegrationService(uow)
 
         # Create synchronous database URL for APScheduler (it doesn't support async drivers)
         sync_db_url = settings.alembic_database_url
@@ -152,7 +204,7 @@ class AppScheduler:
 
     async def stop(self) -> None:
         """Stop the scheduler cleanly."""
-        global _telegram_service, _pnl_analytics
+        global _telegram_service, _pnl_analytics, _scoring_integration_service
 
         if self._scheduler is None:
             logger.warning("Scheduler is not running")
@@ -166,6 +218,7 @@ class AppScheduler:
             # Clear global references
             _telegram_service = None
             _pnl_analytics = None
+            _scoring_integration_service = None
             logger.success("Scheduler stopped successfully")
         except Exception as e:
             logger.error(f"Error stopping scheduler: {e}")
@@ -223,6 +276,17 @@ class AppScheduler:
             id='periodic_weekly_pnl',
             replace_existing=True,
             name='Weekly PNL Calculation(Fridays only)'
+        )
+
+        # Score and analytics update job - every 6 hours at 00:00, 06:00, 12:00, 18:00
+        self._scheduler.add_job(
+            func=update_all_scores_and_analytics_job,
+            trigger='cron',
+            hour='*/6',
+            minute=0,
+            id='score_analytics_update_6h',
+            replace_existing=True,
+            name='Score and Analytics Update Every 6 Hours'
         )
 
         logger.info("Scheduled jobs registered successfully")

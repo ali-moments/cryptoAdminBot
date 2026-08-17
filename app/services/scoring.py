@@ -16,9 +16,11 @@ import statistics
 from decimal import Decimal
 from typing import Dict, List
 
+from loguru import logger
 from app.core.dto import SignalStatistics, ScoreBreakdown, TimeWindow
 from app.services.statistics import StatisticsService
 from app.services.validation import ScoringValidator, ScoringValidationError
+from app.analytics.utils import MathUtils, StatisticalUtils, PerformanceMonitor
 
 
 class ScoringService:
@@ -28,6 +30,7 @@ class ScoringService:
         self._statistics = statistics_service
         self._validator = ScoringValidator()
 
+    @PerformanceMonitor.monitor_performance("calculate_source_score")
     async def calculate_source_score(
         self,
         source_id: int,
@@ -45,11 +48,15 @@ class ScoringService:
         time_window = self._validator.validate_time_window(time_window)
 
         try:
+            logger.debug(f"Calculating score for source {source_id} with time window: {time_window.name if time_window else 'all-time'}")
+            
             # Get source statistics
             source_stats = await self._statistics.get_source_statistics(source_id, time_window)
+            logger.trace(f"Source {source_id} statistics: {source_stats.total_signals} signals, {source_stats.completed_signals} completed")
 
             # Handle new/minimal data sources
             if source_stats.total_signals == 0:
+                logger.info(f"Source {source_id} has no signals, returning default score")
                 return self._validator.handle_new_source_scoring(source_id, 0)
 
             early_stage_score = self._validator.handle_new_source_scoring(source_id, source_stats.total_signals)
@@ -94,8 +101,10 @@ class ScoringService:
             )
 
             # Convert to 0-1000 scale and clamp
-            score = self._clamp(round(1000 * raw_score), 0, 1000)
+            score = MathUtils.clamp(round(1000 * raw_score), 0, 1000)
             display_score = score / 100.0
+            
+            logger.debug(f"Source {source_id} final score: {display_score:.2f}/10 ({score}/1000) from {source_stats.total_signals} signals")
 
             breakdown = ScoreBreakdown(
                 score=score,
@@ -119,18 +128,23 @@ class ScoringService:
 
         except Exception as e:
             if isinstance(e, ScoringValidationError):
+                logger.warning(f"Validation error calculating score for source {source_id}: {e}")
                 raise
 
             # Handle unexpected errors gracefully
+            logger.error(f"Unexpected error calculating score for source {source_id}: {e}")
             raise ScoringValidationError(f"Failed to calculate score for source {source_id}: {str(e)}")
 
+    @PerformanceMonitor.monitor_performance("calculate_all_scores")
     async def calculate_all_scores(
         self,
         time_window: TimeWindow | None = None,
     ) -> Dict[int, ScoreBreakdown]:
         """Calculate scores for all active signal sources."""
 
+        logger.info(f"Calculating scores for all sources with time window: {time_window.name if time_window else 'all-time'}")
         all_stats = await self._statistics.get_all_sources_statistics(time_window)
+        logger.debug(f"Retrieved statistics for {len(all_stats)} sources")
 
         scores = {}
         for source_id in all_stats.keys():
@@ -179,42 +193,12 @@ class ScoringService:
 
         try:
             # Calculate percentile rank (0-100)
-            percentile_rank = self._percentile_rank(float_value, float_population)
+            percentile_rank = StatisticalUtils.calculate_percentile_rank(float_value, float_population)
             # Convert to 0.0-1.0 range
             return percentile_rank / 100.0
         except (ValueError, ZeroDivisionError):
             # Fallback for edge cases
             return 0.0
-
-    def _percentile_rank(self, value: float, population: List[float]) -> float:
-        """
-        Calculate the percentile rank of a value within a population.
-
-        Returns a value between 0 and 100.
-        """
-        if not population:
-            return 0.0
-
-        # Sort the population
-        sorted_pop = sorted(population)
-
-        # Count values less than the target
-        less_than = sum(1 for x in sorted_pop if x < value)
-
-        # Count values equal to the target
-        equal_to = sum(1 for x in sorted_pop if x == value)
-
-        # Calculate percentile rank
-        if len(population) == 1:
-            return 100.0 if equal_to > 0 else 0.0
-
-        percentile = (less_than + 0.5 * equal_to) / len(population) * 100.0
-
-        return max(0.0, min(100.0, percentile))
-
-    def _clamp(self, value: int, min_val: int, max_val: int) -> int:
-        """Clamp value between min and max inclusive."""
-        return max(min_val, min(max_val, value))
 
     def convert_to_display_score(self, score: int) -> float:
         """Convert internal score (0-1000) to display score (0.00-10.00)."""
@@ -222,7 +206,7 @@ class ScoringService:
 
     def convert_from_display_score(self, display_score: float) -> int:
         """Convert display score (0.00-10.00) to internal score (0-1000)."""
-        return self._clamp(round(display_score * 100), 0, 1000)
+        return MathUtils.clamp(round(display_score * 100), 0, 1000)
 
     async def update_source_score(
         self,

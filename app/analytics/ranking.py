@@ -9,9 +9,12 @@ from decimal import Decimal
 from typing import Dict, List, Tuple
 from dataclasses import dataclass
 
+from loguru import logger
 from app.core.dto import TimeWindow, ScoreBreakdown
 from app.services.statistics import StatisticsService
 from app.services.scoring import ScoringService
+from app.services.validation import ScoringValidator, ScoringValidationError
+from app.analytics.utils import PerformanceMonitor
 from app.database.uow import UnitOfWork
 
 
@@ -39,8 +42,10 @@ class AnalyticsRanking:
     def __init__(self, uow: UnitOfWork) -> None:
         self._statistics_service = StatisticsService(uow)
         self._scoring_service = ScoringService(self._statistics_service)
+        self._validator = ScoringValidator()
         self._uow = uow
 
+    @PerformanceMonitor.monitor_performance("get_score_leaderboard")
     async def get_score_leaderboard(
         self,
         criteria: RankingCriteria | None = None,
@@ -51,14 +56,26 @@ class AnalyticsRanking:
         
         Default ranking is by overall score in descending order.
         """
+        # Validate inputs
+        if criteria is not None:
+            self._validator.validate_ranking_criteria(criteria)
+        
+        if limit is not None:
+            limit, _ = self._validator.validate_pagination_params(limit=limit)
+        
         if criteria is None:
             criteria = RankingCriteria(metric="score", ascending=False)
+        
+        logger.debug(f"Generating leaderboard with criteria: metric={criteria.metric}, time_window={criteria.time_window.name if criteria.time_window else 'all-time'}, min_signals={criteria.min_signals}")
         
         # Get all source scores
         all_scores = await self._scoring_service.calculate_all_scores(criteria.time_window)
         
         if not all_scores:
+            logger.info("No scores available for leaderboard generation")
             return []
+        
+        logger.debug(f"Retrieved scores for {len(all_scores)} sources")
         
         # Filter by minimum signals if specified
         if criteria.min_signals > 0:
@@ -67,6 +84,7 @@ class AnalyticsRanking:
                 if breakdown.signal_count >= criteria.min_signals:
                     filtered_scores[source_id] = breakdown
             all_scores = filtered_scores
+            logger.debug(f"Filtered to {len(all_scores)} sources with minimum {criteria.min_signals} signals")
         
         # Sort by specified metric
         sorted_sources = await self._sort_by_metric(all_scores, criteria)
@@ -266,14 +284,24 @@ class AnalyticsRanking:
     ) -> List[RankedSource]:
         """Compare specific sources and return them ranked."""
         
-        all_scores = await self._scoring_service.calculate_all_scores(time_window)
-        source_names = await self._get_source_names(source_ids)
+        # Validate inputs
+        validated_source_ids = self._validator.validate_source_id_list(source_ids)
+        validated_time_window = self._validator.validate_time_window(time_window)
+        
+        logger.debug(f"Comparing {len(validated_source_ids)} sources: {validated_source_ids}")
+        
+        all_scores = await self._scoring_service.calculate_all_scores(validated_time_window)
+        source_names = await self._get_source_names(validated_source_ids)
         
         # Filter to requested sources only
         filtered_scores = {
             sid: breakdown for sid, breakdown in all_scores.items()
-            if sid in source_ids
+            if sid in validated_source_ids
         }
+        
+        if not filtered_scores:
+            logger.warning(f"No scores found for any of the requested sources: {validated_source_ids}")
+            return []
         
         # Sort by score
         sorted_sources = sorted(

@@ -14,6 +14,10 @@ from app.core.dto import TimeWindow, SignalStatistics, ScoreBreakdown
 from app.analytics.statistics import AnalyticsStatistics
 from app.analytics.ranking import AnalyticsRanking, RankingCriteria
 from app.database.uow import UnitOfWork
+from app.services.statistics import StatisticsService
+from app.services.scoring import ScoringService
+from app.services.validation import ScoringValidator, ScoringValidationError
+from app.analytics.utils import PerformanceMonitor
 
 
 @dataclass
@@ -37,11 +41,20 @@ class GeneratedReport:
 class AnalyticsReports:
     """Generates comprehensive reports for signal source performance analysis."""
     
-    def __init__(self, uow: UnitOfWork) -> None:
+    def __init__(
+        self, 
+        uow: UnitOfWork,
+        statistics_service: StatisticsService,
+        scoring_service: ScoringService,
+    ) -> None:
         self._analytics_stats = AnalyticsStatistics(uow)
         self._analytics_ranking = AnalyticsRanking(uow)
+        self._statistics_service = statistics_service
+        self._scoring_service = scoring_service
+        self._validator = ScoringValidator()
         self._uow = uow
 
+    @PerformanceMonitor.monitor_performance("generate_executive_summary")
     async def generate_executive_summary(
         self,
         time_window: TimeWindow | None = None,
@@ -126,6 +139,7 @@ class AnalyticsReports:
             summary=summary,
         )
 
+    @PerformanceMonitor.monitor_performance("generate_detailed_performance_report")
     async def generate_detailed_performance_report(
         self,
         time_window: TimeWindow | None = None,
@@ -230,15 +244,15 @@ class AnalyticsReports:
         Deep dive into individual source performance.
         """
         
-        # Get source statistics and score breakdown
-        from app.services.statistics import StatisticsService
-        from app.services.scoring import ScoringService
+        # Validate inputs
+        validated_source_id = self._validator.validate_source_id(source_id)
+        validated_time_window = self._validator.validate_time_window(time_window)
         
-        stats_service = StatisticsService(self._uow)
-        scoring_service = ScoringService(stats_service)
+        logger.info(f"Generating spotlight report for source {validated_source_id}")
         
-        source_stats = await stats_service.get_source_statistics(source_id, time_window)
-        score_breakdown = await scoring_service.calculate_source_score(source_id, time_window)
+        # Get source statistics and score breakdown using injected services
+        source_stats = await self._statistics_service.get_source_statistics(validated_source_id, validated_time_window)
+        score_breakdown = await self._scoring_service.calculate_source_score(validated_source_id, validated_time_window)
         
         # Get source info
         async with self._uow:
@@ -282,7 +296,7 @@ class AnalyticsReports:
                         "Stop Loss Control": f"{score_breakdown.stop_loss_score:.3f} (10% weight)",
                         "Sample Confidence": f"{score_breakdown.confidence_score:.3f} (10% weight)",
                     },
-                    "explanation": scoring_service.explain_score(score_breakdown),
+                    "explanation": self._scoring_service.explain_score(score_breakdown),
                 },
                 format_type="summary"
             ),
@@ -333,19 +347,19 @@ class AnalyticsReports:
     ) -> GeneratedReport:
         """Generate side-by-side comparison report for multiple sources."""
         
-        comparison = await self._analytics_ranking.compare_sources(source_ids, time_window)
+        # Validate inputs
+        validated_source_ids = self._validator.validate_source_id_list(source_ids)
+        validated_time_window = self._validator.validate_time_window(time_window)
         
-        # Get detailed statistics for each source
-        from app.services.statistics import StatisticsService
-        from app.services.scoring import ScoringService
+        logger.info(f"Generating comparison report for sources: {validated_source_ids}")
         
-        stats_service = StatisticsService(self._uow)
-        scoring_service = ScoringService(stats_service)
+        comparison = await self._analytics_ranking.compare_sources(validated_source_ids, validated_time_window)
         
+        # Get detailed statistics for each source using injected services
         detailed_data = []
         for source_id in source_ids:
-            stats = await stats_service.get_source_statistics(source_id, time_window)
-            score = await scoring_service.calculate_source_score(source_id, time_window)
+            stats = await self._statistics_service.get_source_statistics(source_id, time_window)
+            score = await self._scoring_service.calculate_source_score(source_id, time_window)
             
             # Get source name
             async with self._uow:
@@ -546,12 +560,9 @@ class AnalyticsReports:
             TimeWindow.all_time(),
         ]
         
-        from app.services.statistics import StatisticsService
-        stats_service = StatisticsService(self._uow)
-        
         series_data = {}
         for window in windows:
-            stats = await stats_service.get_source_statistics(source_id, window)
+            stats = await self._statistics_service.get_source_statistics(source_id, window)
             series_data[window.name] = {
                 "tp_rate": float(stats.tp_hit_rate),
                 "total_profit": float(stats.total_profit),

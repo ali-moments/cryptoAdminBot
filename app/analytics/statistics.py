@@ -9,9 +9,11 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Dict, List
 
+from loguru import logger
 from app.core.dto import SignalStatistics, TimeWindow
 from app.services.statistics import StatisticsService
 from app.database.uow import UnitOfWork
+from app.analytics.utils import StatisticalUtils, MathUtils
 
 
 class AnalyticsStatistics:
@@ -127,9 +129,9 @@ class AnalyticsStatistics:
             }
         
         # Create distribution buckets
-        tp_rate_buckets = self._create_distribution_buckets(tp_rates, 10)
-        profit_buckets = self._create_distribution_buckets(total_profits, 10)
-        signal_count_buckets = self._create_distribution_buckets(signal_counts, 5)
+        tp_rate_buckets = StatisticalUtils.create_distribution_buckets(tp_rates, 10)
+        profit_buckets = StatisticalUtils.create_distribution_buckets(total_profits, 10)
+        signal_count_buckets = StatisticalUtils.create_distribution_buckets(signal_counts, 5)
         
         return {
             "tp_rate_distribution": tp_rate_buckets,
@@ -242,46 +244,9 @@ class AnalyticsStatistics:
         
         return correlations
 
-    def _create_distribution_buckets(
-        self, 
-        values: List[float], 
-        bucket_count: int
-    ) -> List[Dict]:
-        """Create distribution buckets for histogram-style analysis."""
-        
-        if not values:
-            return []
-        
-        min_val = min(values)
-        max_val = max(values)
-        
-        if min_val == max_val:
-            return [{"range": f"{min_val:.3f}", "count": len(values)}]
-        
-        bucket_size = (max_val - min_val) / bucket_count
-        buckets = []
-        
-        for i in range(bucket_count):
-            bucket_min = min_val + i * bucket_size
-            bucket_max = min_val + (i + 1) * bucket_size
-            
-            count = sum(
-                1 for v in values 
-                if bucket_min <= v < bucket_max or (i == bucket_count - 1 and v == bucket_max)
-            )
-            
-            buckets.append({
-                "range": f"{bucket_min:.3f}-{bucket_max:.3f}",
-                "count": count,
-            })
-        
-        return buckets
-
     def _calculate_pearson_correlation(self, x: List[float], y: List[float]) -> float:
         """Calculate Pearson correlation coefficient."""
-        
-        if len(x) != len(y) or len(x) < 2:
-            return 0.0
+        return StatisticalUtils.calculate_correlation(x, y)
         
         n = len(x)
         sum_x = sum(x)

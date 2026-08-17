@@ -79,6 +79,58 @@ class ScoringIntegrationService:
         except Exception as e:
             raise ScoringValidationError(f"Failed to update source scores: {str(e)}")
 
+    async def update_all_source_scores_and_statistics(
+        self,
+        time_window: TimeWindow | None = None,
+        batch_size: int = 10,
+    ) -> Dict[str, int]:
+        """
+        Update both scores and statistics for all active signal sources.
+        
+        This ensures the database has up-to-date analytics data for admin panel use.
+        
+        Args:
+            time_window: Time window for scoring calculations
+            batch_size: Number of sources to process concurrently
+            
+        Returns:
+            Dictionary with update statistics
+        """
+        
+        results = {
+            "total_sources": 0,
+            "successful_updates": 0,
+            "failed_updates": 0,
+            "skipped_sources": 0,
+            "statistics_updated": 0,
+        }
+        
+        try:
+            # Get all active sources
+            async with self._uow:
+                sources = await self._uow.signal_sources.active()
+                results["total_sources"] = len(sources)
+            
+            if not sources:
+                return results
+            
+            # Process sources in batches to avoid overwhelming the database
+            source_batches = [
+                sources[i:i + batch_size] 
+                for i in range(0, len(sources), batch_size)
+            ]
+            
+            for batch in source_batches:
+                await self._process_source_batch_with_statistics(batch, time_window, results)
+                
+                # Brief pause between batches to be database-friendly
+                await asyncio.sleep(0.1)
+            
+            return results
+            
+        except Exception as e:
+            raise ScoringValidationError(f"Failed to update source scores and statistics: {str(e)}")
+
     async def update_single_source_score(
         self,
         source_id: int,
@@ -367,6 +419,22 @@ class ScoringIntegrationService:
         # Process batch concurrently
         await asyncio.gather(*tasks, return_exceptions=True)
 
+    async def _process_source_batch_with_statistics(
+        self,
+        sources: List,
+        time_window: TimeWindow | None,
+        results: Dict[str, int],
+    ) -> None:
+        """Process a batch of sources concurrently, updating both scores and statistics."""
+        
+        tasks = []
+        for source in sources:
+            task = self._update_single_source_with_statistics_safe(source.id, time_window, results)
+            tasks.append(task)
+        
+        # Process batch concurrently
+        await asyncio.gather(*tasks, return_exceptions=True)
+
     async def _update_single_source_safe(
         self,
         source_id: int,
@@ -386,3 +454,78 @@ class ScoringIntegrationService:
         except Exception:
             # Unexpected errors
             results["failed_updates"] += 1
+
+    async def _update_single_source_with_statistics_safe(
+        self,
+        source_id: int,
+        time_window: TimeWindow | None,
+        results: Dict[str, int],
+    ) -> None:
+        """Safely update a single source score and statistics with error handling."""
+        
+        try:
+            # Update score
+            await self.update_single_source_score(source_id, time_window)
+            
+            # Update statistics in the database
+            await self.update_source_statistics(source_id, time_window)
+            
+            results["successful_updates"] += 1
+            results["statistics_updated"] += 1
+            
+        except ScoringValidationError:
+            # Expected validation errors
+            results["failed_updates"] += 1
+            
+        except Exception:
+            # Unexpected errors
+            results["failed_updates"] += 1
+
+    async def update_source_statistics(
+        self,
+        source_id: int,
+        time_window: TimeWindow | None = None,
+    ) -> bool:
+        """
+        Update the stored statistics for a signal source in the database.
+        
+        This ensures the admin panel gets current data from the database
+        rather than calculating it on-demand.
+        
+        Args:
+            source_id: ID of the source to update
+            time_window: Time window for calculations (defaults to all-time)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        
+        try:
+            # Calculate current statistics
+            source_stats = await self._statistics_service.get_source_statistics(
+                source_id, time_window or TimeWindow.all_time()
+            )
+            
+            # Update the database with calculated statistics
+            async with self._uow:
+                success = await self._uow.signal_sources.update_statistics(
+                    source_id,
+                    total_signals=source_stats.total_signals,
+                    winning_signals=source_stats.tp_hit_count,
+                    losing_signals=source_stats.stop_loss_count,
+                    cancelled_signals=source_stats.cancelled_count,
+                    expired_signals=source_stats.expired_count,
+                    average_profit=source_stats.average_profit,
+                    best_profit=source_stats.best_profit,
+                    worst_profit=source_stats.worst_profit,
+                )
+                
+                if success:
+                    await self._uow.commit()
+                    return True
+                    
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to update statistics for source {source_id}: {e}")
+            return False

@@ -1,4 +1,5 @@
 from loguru import logger
+import math
 from decimal import Decimal
 from typing import List
 from app.core.dto import ParsedSignal, ValidatedSignal, SignalStatistics, ScoreBreakdown, TimeWindow
@@ -323,23 +324,72 @@ class ScoringValidator:
         return None  # Proceed with normal percentile calculation
 
     def validate_time_window(self, time_window: TimeWindow | None) -> TimeWindow | None:
-        """Validate time window parameters."""
+        """
+        Validate time window parameters with comprehensive checks.
+        
+        Args:
+            time_window: TimeWindow object or None
+            
+        Returns:
+            Validated TimeWindow or None
+            
+        Raises:
+            ScoringValidationError: If validation fails
+        """
         if time_window is None:
             return None
 
+        # Validate name is not empty
+        if not time_window.name or not isinstance(time_window.name, str):
+            raise ScoringValidationError(f"Invalid time window name: {time_window.name}")
+        
+        # Validate name format
+        valid_names = {"all-time", "last-48h", "last-7d", "last-30d", "24h", "week", "month", "quarter", "year"}
+        if time_window.name not in valid_names:
+            logger.warning(f"Unrecognized time window name: {time_window.name}")
+
         if time_window.hours is not None:
-            if time_window.hours <= 0:
-                raise ScoringValidationError(f"Invalid time window: {time_window.hours} hours")
+            if not isinstance(time_window.hours, (int, float)) or time_window.hours <= 0:
+                raise ScoringValidationError(f"Invalid time window hours: {time_window.hours}")
 
             if time_window.hours > 365 * 24:  # More than a year
-                raise ScoringValidationError(f"Time window too large: {time_window.hours} hours")
+                raise ScoringValidationError(f"Time window too large: {time_window.hours} hours (max: {365 * 24})")
+            
+            # Warn for very small time windows
+            if time_window.hours < 1:
+                logger.warning(f"Very small time window: {time_window.hours} hours")
 
         return time_window
 
     def validate_source_id(self, source_id: int) -> int:
-        """Validate source ID parameter."""
-        if not isinstance(source_id, int) or source_id <= 0:
-            raise ScoringValidationError(f"Invalid source ID: {source_id}")
+        """
+        Validate source ID parameter with comprehensive checks.
+        
+        Args:
+            source_id: Source ID to validate
+            
+        Returns:
+            Validated source ID
+            
+        Raises:
+            ScoringValidationError: If validation fails
+        """
+        if source_id is None:
+            raise ScoringValidationError("Source ID cannot be None")
+            
+        if not isinstance(source_id, int):
+            # Try to convert to int if it's a string number
+            try:
+                source_id = int(source_id)
+            except (ValueError, TypeError):
+                raise ScoringValidationError(f"Invalid source ID type: {type(source_id)} (value: {source_id})")
+        
+        if source_id <= 0:
+            raise ScoringValidationError(f"Source ID must be positive integer, got: {source_id}")
+        
+        # Check for unreasonably large IDs (potential overflow or corruption)
+        if source_id > 2**31 - 1:  # Max signed 32-bit integer
+            raise ScoringValidationError(f"Source ID too large: {source_id}")
 
         return source_id
 
@@ -352,6 +402,145 @@ class ScoringValidator:
             raise ScoringValidationError(f"Score {score} outside valid range 0-1000")
 
         return score
+
+    def validate_source_id_list(self, source_ids: List[int]) -> List[int]:
+        """
+        Validate a list of source IDs.
+        
+        Args:
+            source_ids: List of source IDs to validate
+            
+        Returns:
+            List of validated source IDs
+            
+        Raises:
+            ScoringValidationError: If validation fails
+        """
+        if not isinstance(source_ids, list):
+            raise ScoringValidationError(f"Source IDs must be a list, got {type(source_ids)}")
+        
+        if not source_ids:
+            raise ScoringValidationError("Source ID list cannot be empty")
+        
+        if len(source_ids) > 1000:  # Prevent excessive processing
+            raise ScoringValidationError(f"Too many source IDs: {len(source_ids)} (max: 1000)")
+        
+        validated_ids = []
+        for i, source_id in enumerate(source_ids):
+            try:
+                validated_id = self.validate_source_id(source_id)
+                validated_ids.append(validated_id)
+            except ScoringValidationError as e:
+                raise ScoringValidationError(f"Invalid source ID at index {i}: {e}")
+        
+        # Check for duplicates
+        if len(set(validated_ids)) != len(validated_ids):
+            logger.warning("Duplicate source IDs found in list")
+        
+        return validated_ids
+
+    def validate_pagination_params(self, limit: int | None = None, offset: int | None = None) -> tuple[int | None, int | None]:
+        """
+        Validate pagination parameters.
+        
+        Args:
+            limit: Maximum number of items to return
+            offset: Number of items to skip
+            
+        Returns:
+            Tuple of validated (limit, offset)
+            
+        Raises:
+            ScoringValidationError: If validation fails
+        """
+        if limit is not None:
+            if not isinstance(limit, int) or limit <= 0:
+                raise ScoringValidationError(f"Limit must be positive integer, got: {limit}")
+            
+            if limit > 10000:  # Prevent excessive memory usage
+                raise ScoringValidationError(f"Limit too large: {limit} (max: 10000)")
+        
+        if offset is not None:
+            if not isinstance(offset, int) or offset < 0:
+                raise ScoringValidationError(f"Offset must be non-negative integer, got: {offset}")
+        
+        return limit, offset
+
+    def validate_ranking_criteria(self, criteria) -> None:
+        """
+        Validate ranking criteria parameters.
+        
+        Args:
+            criteria: RankingCriteria object to validate
+            
+        Raises:
+            ScoringValidationError: If validation fails
+        """
+        if criteria is None:
+            return
+        
+        # Validate metric
+        valid_metrics = {"score", "tp_rate", "profit", "avg_profit", "signal_count", "consistency"}
+        if criteria.metric not in valid_metrics:
+            raise ScoringValidationError(f"Invalid ranking metric: {criteria.metric}. Valid options: {valid_metrics}")
+        
+        # Validate time window
+        self.validate_time_window(criteria.time_window)
+        
+        # Validate min_signals
+        if not isinstance(criteria.min_signals, int) or criteria.min_signals < 0:
+            raise ScoringValidationError(f"Min signals must be non-negative integer, got: {criteria.min_signals}")
+        
+        if criteria.min_signals > 1000:  # Reasonable upper bound
+            logger.warning(f"Very high min_signals requirement: {criteria.min_signals}")
+        
+        # Validate ascending flag
+        if not isinstance(criteria.ascending, bool):
+            raise ScoringValidationError(f"Ascending must be boolean, got: {type(criteria.ascending)}")
+
+    def validate_numeric_range(
+        self, 
+        value: float | int | Decimal, 
+        min_value: float | int | Decimal | None = None,
+        max_value: float | int | Decimal | None = None,
+        field_name: str = "value"
+    ) -> float | int | Decimal:
+        """
+        Validate a numeric value is within acceptable range.
+        
+        Args:
+            value: Numeric value to validate
+            min_value: Minimum acceptable value (inclusive)
+            max_value: Maximum acceptable value (inclusive)
+            field_name: Name of field for error messages
+            
+        Returns:
+            Validated value
+            
+        Raises:
+            ScoringValidationError: If validation fails
+        """
+        if value is None:
+            raise ScoringValidationError(f"{field_name} cannot be None")
+        
+        if not isinstance(value, (int, float, Decimal)):
+            raise ScoringValidationError(f"{field_name} must be numeric, got {type(value)}")
+        
+        # Check for NaN or infinite values
+        if isinstance(value, float):
+            if math.isnan(value):
+                raise ScoringValidationError(f"{field_name} cannot be NaN")
+            if math.isinf(value):
+                raise ScoringValidationError(f"{field_name} cannot be infinite")
+        
+        # Range validation
+        if min_value is not None and value < min_value:
+            raise ScoringValidationError(f"{field_name} {value} below minimum {min_value}")
+        
+        if max_value is not None and value > max_value:
+            raise ScoringValidationError(f"{field_name} {value} above maximum {max_value}")
+        
+        return value
 
     def check_data_quality_warnings(self, stats: SignalStatistics) -> List[str]:
         """

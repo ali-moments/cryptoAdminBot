@@ -56,9 +56,9 @@ class AdminService:
     # ================================
 
     async def get_sources_page(self, page: int, page_size: int = 5) -> dict:
-        """Get paginated list of signal sources with scores."""
+        """Get paginated list of signal sources with scores from database."""
         async with self._uow_factory() as uow:
-            # Get all sources ordered by score
+            # Get all sources ordered by score (database values)
             sources = await uow.signal_sources.all()
 
             # Calculate pagination
@@ -68,40 +68,21 @@ class AdminService:
             end_idx = start_idx + page_size
             page_sources = sources[start_idx:end_idx]
 
-            # Get statistics for each source on this page
+            # Use database values directly instead of calculating on-demand
             source_data = []
             for source in page_sources:
-                try:
-                    # Only get statistics for sources with signals to avoid errors
-                    if source.total_signals > 0:
-                        stats = await self._statistics.get_source_statistics(source.id)
-                        tp_hit_rate = float(stats.tp_hit_rate)
-                        total_signals_from_stats = stats.total_signals
-                    else:
-                        tp_hit_rate = 0.0
-                        total_signals_from_stats = source.total_signals
-                        
-                    source_data.append({
-                        "id": source.id,
-                        "name": source.name,
-                        "score": source.score / 100,  # Convert back from ×100 format
-                        "is_active": source.is_active,
-                        "total_signals": total_signals_from_stats,
-                        "tp_hit_rate": tp_hit_rate,
-                        "winrate": float(source.winrate) if source.winrate else 0.0,
-                    })
-                except Exception as e:
-                    logger.warning(f"Failed to get stats for source {source.id}: {e}")
-                    # Fallback to basic data without statistics service
-                    source_data.append({
-                        "id": source.id,
-                        "name": source.name,
-                        "score": source.score / 100,
-                        "is_active": source.is_active,
-                        "total_signals": source.total_signals,
-                        "tp_hit_rate": 0.0,
-                        "winrate": float(source.winrate) if source.winrate else 0.0,
-                    })
+                source_data.append({
+                    "id": source.id,
+                    "name": source.name,
+                    "score": source.score / 100,  # Convert back from ×100 format
+                    "is_active": source.is_active,
+                    "total_signals": source.total_signals,  # Use database value
+                    "tp_hit_rate": float(source.winrate) / 100.0,  # Use calculated winrate from database
+                    "winrate": float(source.winrate) if source.winrate else 0.0,
+                    "average_profit": float(source.average_profit) if source.average_profit else 0.0,
+                    "best_profit": float(source.best_profit) if source.best_profit else 0.0,
+                    "last_updated": source.updated_at.isoformat() if source.updated_at else None,
+                })
 
             return {
                 "sources": source_data,
