@@ -44,13 +44,26 @@ class TrackingManager:
 
         Called after provider recovery to ensure trackings resume processing
         even if they were already initialized before the provider failure.
+        
+        Note: This is intentionally broad - it resets ALL trackings rather than
+        trying to determine which ones were affected by the provider change.
+        This ensures robustness at the cost of some redundant reinitialization.
         """
         count = len(self._initialized_trackings)
         self._initialized_trackings.clear()
         logger.info(f"Reset initialization state for {count} trackings - will re-initialize on next tick")
 
     async def on_provider_changed(self, event: ProviderChangedEvent) -> None:
-        """Handle provider change events by resetting tracking initialization state."""
+        """Handle provider change events by resetting tracking initialization state.
+        
+        Currently resets ALL tracking initialization state as a conservative approach.
+        This ensures all trackings are re-evaluated after provider changes, which
+        prevents missed actions but may cause some redundant reinitialization.
+        
+        The alternative would be to track which provider each tracking uses and only
+        reset those affected by the change, but this adds complexity without clear
+        benefit since reinitialization is designed to be idempotent.
+        """
         logger.info(f"Provider changed from {event.previous.value} to {event.current.value} - resetting tracking initialization")
         self.reset_initialization_state()
 
@@ -187,12 +200,12 @@ class TrackingManager:
         This is the FIRST market observation for this tracking in the
         current engine session.
 
-        Delegates to the existing EntryRule logic to avoid duplicating
-        business rules. This ensures there is only one source of truth
-        for entry detection.
+        Business Rule: Initialization must allow missed TP recovery.
+        If price moved beyond unprocessed targets while engine was offline,
+        those targets must be recovered during normal rule processing.
 
-        Business Rule: If price is already beyond entry points when
-        engine first observes the tracking, entry actions are emitted.
+        For WAITING_ENTRY trackings: Delegate to EntryRule to detect entries.
+        For TRACKING trackings: Return [] to allow normal rule processing.
 
         This method has NO side effects. It only observes and returns actions.
 
@@ -200,8 +213,10 @@ class TrackingManager:
         After restart, runs again for all active trackings.
         """
 
-        # Only initialize trackings waiting for entry
+        # Only handle entry detection for trackings waiting for entry
         if tracking.status != TrackingStatus.WAITING_ENTRY:
+            # For trackings already in TRACKING state, return [] to allow
+            # normal processing to handle TP recovery
             return []
 
         # If position already entered, no initialization needed

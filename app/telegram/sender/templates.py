@@ -76,7 +76,8 @@ class MessageTemplates:
 
     PNL_HEADER = f"{emojies.PNL_HEADER1}<b>برآیند امروز تیم رویال</b>{emojies.ROYAL}\n\n"
 
-    PNL_ITEM = "{emoji1}<b><a href=\"{symbol_url}\">{symbol}</a> <a href=\"{status_url}\">{status}</a> — {pnl}%</b>{emoji2}\n"
+    PNL_ITEM = "<b><a href=\"{symbol_url}\">{symbol}</a> <a href=\"{status_url}\">{status}</a> — {pnl}%</b>{emoji2}\n"
+    # PNL_ITEM = "{emoji1}<b><a href=\"{symbol_url}\">{symbol}</a> <a href=\"{status_url}\">{status}</a> — {pnl}%</b>{emoji2}\n"
 
     PNL_FOOTER = (
         f'{emojies.PNL_SPACER_FULL}\n\n'

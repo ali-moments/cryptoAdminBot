@@ -158,7 +158,7 @@ class TelegramFormatter:
             emoji1, emoji2 = self._get_pnl_emoji(item.status)
             status_msg_id = item.status_msg_id if item.status_msg_id else item.signal_msg_id
             pnl_items.append(self.templates.PNL_ITEM.format(
-                emoji1=emoji1,
+                # emoji1=emoji1,
                 symbol_url = self._generate_msg_url(item.signal_msg_id, channel_id),
                 symbol=item.symbol,
                 status_url = self._generate_msg_url(status_msg_id, channel_id),

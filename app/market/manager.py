@@ -348,11 +348,15 @@ class ProviderManager:
                 logger.debug(f"{provider_enum.value} not connected, skipping for {symbol}")
                 continue
             
-            # Check if provider supports symbol using REST API
+            # Check if provider supports symbol using REST API with timeout
             try:
-                await provider.current_price(symbol)
+                # Add timeout to prevent indefinite blocking
+                await asyncio.wait_for(provider.current_price(symbol), timeout=5.0)
                 # Symbol exists on this provider
                 logger.debug(f"{provider_enum.value} supports {symbol}")
+            except asyncio.TimeoutError:
+                logger.warning(f"{provider_enum.value} availability check timed out for {symbol}")
+                continue
             except aiohttp.ClientResponseError as e:
                 if e.status == 400:
                     # Bad symbol - provider doesn't support it
@@ -366,14 +370,17 @@ class ProviderManager:
                 logger.warning(f"{provider_enum.value} failed availability check for {symbol}: {e}")
                 continue
             
-            # Try to subscribe via WebSocket
+            # Try to subscribe via WebSocket with timeout
             try:
-                await provider.subscribe(symbol)
+                await asyncio.wait_for(provider.subscribe(symbol), timeout=10.0)
                 # Update mapping under lock
                 async with self._sync_lock:
                     self._symbol_providers[symbol] = provider_enum
                 logger.info(f"✓ Subscribed {symbol} to {provider_enum.value}")
                 return True
+            except asyncio.TimeoutError:
+                logger.warning(f"✗ Subscription timeout for {symbol} to {provider_enum.value}")
+                continue
             except Exception as e:
                 logger.warning(f"✗ Failed to subscribe {symbol} to {provider_enum.value}: {e}")
                 continue

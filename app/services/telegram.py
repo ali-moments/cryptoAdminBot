@@ -418,15 +418,15 @@ class TelegramService:
             return False
 
         reply_to = None
-        top_tp = 0
-        for item in pnldto.items:
-            if item.status.startswith('TP'):
-                try:
-                    if int(item.status.replace('TP', '')) > top_tp:
-                        top_tp = int(item.status.replace('TP', ''))
-                        reply_to = item.status_msg_id
-                except Exception:
-                    continue
+        # top_tp = 0
+        # for item in pnldto.items:
+        #     if item.status.startswith('TP'):
+        #         try:
+        #             if int(item.status.replace('TP', '')) > top_tp:
+        #                 top_tp = int(item.status.replace('TP', ''))
+        #                 reply_to = item.status_msg_id
+        #         except Exception:
+        #             continue
 
         text = self._formatter.format_pnl(pnldto, self.states.target_channel)
         
