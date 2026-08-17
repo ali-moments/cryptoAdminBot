@@ -295,6 +295,7 @@ class TelegramService:
             await self._sender.queue_message(
                 channel_id=self.states.target_channel,
                 message=self._formatter.format_profit_shot(),
+                uow=uow,
             )
 
         return success
