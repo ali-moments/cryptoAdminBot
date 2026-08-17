@@ -46,7 +46,6 @@ class PnlAnalytics:
         end = start + timedelta(days=7)  # Next Monday 00:00
         logger.info(f"Calculating weekly PNL for period: {start} to {end}")
         return await self._calculate_pnl(start, end)
-        return await self._calculate_pnl(start, end)
     
     async def _calculate_pnl(
         self,
@@ -176,9 +175,10 @@ class PnlAnalytics:
             return Decimal("0")
         
         # Get current market price
-        current_price = self._price_cache.get_price(tracking.signal.symbol)
-        if not current_price:
+        price_tick = self._price_cache.get(tracking.signal.symbol)
+        if not price_tick:
             return Decimal("0")
+        current_price = price_tick.price
         
         # Calculate unrealized P&L percentage
         direction = tracking.signal.direction
