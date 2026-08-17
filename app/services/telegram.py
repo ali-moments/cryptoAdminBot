@@ -397,11 +397,9 @@ class TelegramService:
             logger.trace("Bot disabled, skipping admin TP hit send")
             return False
 
-        # Get the TP hit record that was created
-        tp_hit = None
-        async with self._uow_factory() as temp_uow:
-            tp_hit = await temp_uow.tp_hits.get_by_tracking_and_position(tracking.id, tp_position)
-
+        # Get the TP hit record from the same UnitOfWork
+        tp_hit = await uow.tp_hits.get_by_tracking_and_position(tracking.id, tp_position)
+        
         if not tp_hit:
             logger.error(f"TP hit record not found for tracking {tracking.id}, position {tp_position}")
             return False

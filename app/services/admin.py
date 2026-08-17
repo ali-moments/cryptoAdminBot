@@ -322,15 +322,15 @@ class AdminService:
                 },
             )
 
-            await uow.commit()
-
-            # Send TP hit message if telegram service available
+            # Send TP hit message if telegram service available (BEFORE commit)
             if self._telegram:
                 try:
                     await self._telegram.send_admin_tp_hit(tracking, tp_position, uow)
                     logger.info(f"TP{tp_position} hit message sent for tracking {tracking_id}")
                 except Exception as e:
                     logger.error(f"Failed to send TP hit message for tracking {tracking_id}: {e}")
+
+            await uow.commit()
 
             logger.info(f"TP{tp_position} hit manually for tracking {tracking_id} ({tracking.signal.symbol}) by admin")
 
