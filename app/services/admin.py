@@ -234,15 +234,15 @@ class AdminService:
                 },
             )
 
-            await uow.commit()
-
-            # Send stop message if telegram service available
+            # Send stop message if telegram service available (BEFORE commit)
             if self._telegram:
                 try:
                     await self._telegram.send_admin_stop_message(tracking, uow)
                     logger.info(f"Stop message sent for tracking {tracking_id}")
                 except Exception as e:
                     logger.error(f"Failed to send stop message for tracking {tracking_id}: {e}")
+
+            await uow.commit()
 
             logger.info(f"Tracking {tracking_id} ({tracking.signal.symbol}) stopped by admin")
 
@@ -391,15 +391,15 @@ class AdminService:
                 },
             )
 
-            await uow.commit()
-
-            # Send entry hit message if telegram service available
+            # Send entry hit message if telegram service available (BEFORE commit)
             if self._telegram:
                 try:
                     await self._telegram.send_admin_entry_hit(tracking, entry_position, uow)
                     logger.info(f"Entry{entry_position} hit message sent for tracking {tracking_id}")
                 except Exception as e:
                     logger.error(f"Failed to send entry hit message for tracking {tracking_id}: {e}")
+
+            await uow.commit()
 
             logger.info(f"Entry{entry_position} hit manually for tracking {tracking_id} ({tracking.signal.symbol}) by admin")
 
