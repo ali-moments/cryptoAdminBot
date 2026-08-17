@@ -157,7 +157,7 @@ class TelegramService:
             message=text,
             signal_id=tracking.signal_id,
             tracking_id=tracking.id,
-            telegram_message_type=MessageType.SIGNAL.value.value,
+            telegram_message_type=MessageType.SIGNAL.value,
         )
         
         if success:
