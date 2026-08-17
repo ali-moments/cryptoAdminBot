@@ -172,7 +172,7 @@ def build_application() -> Application:
     reader = TelegramReader(reader_manager)
 
     # Create analytics components
-    pnl_analytics = PnlAnalytics(UnitOfWork(), price_cache)
+    pnl_analytics = PnlAnalytics(UnitOfWork, price_cache)
 
     # Create scheduler with telegram service and analytics
     scheduler = AppScheduler(telegram_service, pnl_analytics)

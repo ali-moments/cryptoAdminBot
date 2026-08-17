@@ -24,9 +24,9 @@ class ScoringIntegrationService:
     the scoring system and the database.
     """
     
-    def __init__(self, uow: UnitOfWork) -> None:
-        self._uow = uow
-        self._statistics_service = StatisticsService(uow)
+    def __init__(self, uow_factory: callable) -> None:
+        self._uow_factory = uow_factory
+        self._statistics_service = StatisticsService(uow_factory)
         self._scoring_service = ScoringService(self._statistics_service)
         self._validator = ScoringValidator()
 
@@ -55,8 +55,8 @@ class ScoringIntegrationService:
         
         try:
             # Get all active sources
-            async with self._uow:
-                sources = await self._uow.signal_sources.active()
+            async with self._uow_factory() as uow:
+                sources = await uow.signal_sources.active()
                 results["total_sources"] = len(sources)
             
             if not sources:
@@ -107,8 +107,8 @@ class ScoringIntegrationService:
         
         try:
             # Get all active sources
-            async with self._uow:
-                sources = await self._uow.signal_sources.active()
+            async with self._uow_factory() as uow:
+                sources = await uow.signal_sources.active()
                 results["total_sources"] = len(sources)
             
             if not sources:
@@ -153,13 +153,13 @@ class ScoringIntegrationService:
         )
         
         # Update the database
-        async with self._uow:
-            success = await self._uow.signal_sources.update_score(
+        async with self._uow_factory() as uow:
+            success = await uow.signal_sources.update_score(
                 source_id, score_breakdown.score
             )
             
             if success:
-                await self._uow.commit()
+                await uow.commit()
             else:
                 raise ScoringValidationError(f"Failed to update score for source {source_id}")
         
@@ -187,13 +187,13 @@ class ScoringIntegrationService:
             validated_scores[validated_source_id] = validated_score
         
         # Perform bulk update
-        async with self._uow:
-            updated_count = await self._uow.signal_sources.batch_update_scores(
+        async with self._uow_factory() as uow:
+            updated_count = await uow.signal_sources.batch_update_scores(
                 validated_scores
             )
             
             if updated_count > 0:
-                await self._uow.commit()
+                await uow.commit()
             
             return updated_count
 
@@ -226,8 +226,8 @@ class ScoringIntegrationService:
         }
         
         # Get all active sources
-        async with self._uow:
-            sources = await self._uow.signal_sources.active()
+        async with self._uow_factory() as uow:
+            sources = await uow.signal_sources.active()
             results["statistics"]["total_sources"] = len(sources)
         
         if not sources:
@@ -284,8 +284,8 @@ class ScoringIntegrationService:
             "skip": [],            # Sources that don't need updates
         }
         
-        async with self._uow:
-            sources = await self._uow.signal_sources.active()
+        async with self._uow_factory() as uow:
+            sources = await uow.signal_sources.active()
         
         for source in sources:
             try:
@@ -331,8 +331,8 @@ class ScoringIntegrationService:
             "inconsistencies": [],
         }
         
-        async with self._uow:
-            sources = await self._uow.signal_sources.active()
+        async with self._uow_factory() as uow:
+            sources = await uow.signal_sources.active()
             report["total_sources"] = len(sources)
         
         for source in sources:
@@ -384,18 +384,18 @@ class ScoringIntegrationService:
         """
         
         try:
-            async with self._uow:
-                success = await self._uow.signal_sources.update_score(source_id, 0)
+            async with self._uow_factory() as uow:
+                success = await uow.signal_sources.update_score(source_id, 0)
                 
                 if success:
                     # Also reset related statistics if needed
-                    await self._uow.signal_sources.update_statistics(
+                    await uow.signal_sources.update_statistics(
                         source_id,
                         score=0,
                         # Could reset other fields here if needed
                     )
                     
-                    await self._uow.commit()
+                    await uow.commit()
                     return True
                 
                 return False
@@ -507,8 +507,8 @@ class ScoringIntegrationService:
             )
             
             # Update the database with calculated statistics
-            async with self._uow:
-                success = await self._uow.signal_sources.update_statistics(
+            async with self._uow_factory() as uow:
+                success = await uow.signal_sources.update_statistics(
                     source_id,
                     total_signals=source_stats.total_signals,
                     winning_signals=source_stats.tp_hit_count,
@@ -521,7 +521,7 @@ class ScoringIntegrationService:
                 )
                 
                 if success:
-                    await self._uow.commit()
+                    await uow.commit()
                     return True
                     
                 return False

@@ -19,9 +19,9 @@ from app.analytics.utils import StatisticalUtils, MathUtils
 class AnalyticsStatistics:
     """High-level statistical analysis for analytics purposes."""
     
-    def __init__(self, uow: UnitOfWork) -> None:
-        self._statistics_service = StatisticsService(uow)
-        self._uow = uow
+    def __init__(self, uow_factory: callable) -> None:
+        self._statistics_service = StatisticsService(uow_factory)
+        self._uow_factory = uow_factory
 
     async def get_system_overview(self, time_window: TimeWindow | None = None) -> Dict:
         """Get system-wide statistics overview."""

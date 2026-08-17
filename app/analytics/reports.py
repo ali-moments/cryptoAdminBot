@@ -43,16 +43,16 @@ class AnalyticsReports:
     
     def __init__(
         self, 
-        uow: UnitOfWork,
+        uow_factory: callable,
         statistics_service: StatisticsService,
         scoring_service: ScoringService,
     ) -> None:
-        self._analytics_stats = AnalyticsStatistics(uow)
-        self._analytics_ranking = AnalyticsRanking(uow)
+        self._analytics_stats = AnalyticsStatistics(uow_factory)
+        self._analytics_ranking = AnalyticsRanking(uow_factory)
         self._statistics_service = statistics_service
         self._scoring_service = scoring_service
         self._validator = ScoringValidator()
-        self._uow = uow
+        self._uow_factory = uow_factory
 
     @PerformanceMonitor.monitor_performance("generate_executive_summary")
     async def generate_executive_summary(
@@ -255,8 +255,8 @@ class AnalyticsReports:
         score_breakdown = await self._scoring_service.calculate_source_score(validated_source_id, validated_time_window)
         
         # Get source info
-        async with self._uow:
-            source = await self._uow.signal_sources.get(source_id)
+        async with self._uow_factory() as uow:
+            source = await uow.signal_sources.get(source_id)
             source_name = source.name if source else f"Source {source_id}"
         
         # Get comparative ranking
@@ -362,8 +362,8 @@ class AnalyticsReports:
             score = await self._scoring_service.calculate_source_score(source_id, time_window)
             
             # Get source name
-            async with self._uow:
-                source = await self._uow.signal_sources.get(source_id)
+            async with self._uow_factory() as uow:
+                source = await uow.signal_sources.get(source_id)
                 source_name = source.name if source else f"Source {source_id}"
             
             detailed_data.append({

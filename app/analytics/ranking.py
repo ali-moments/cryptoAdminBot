@@ -39,11 +39,11 @@ class RankingCriteria:
 class AnalyticsRanking:
     """Provides ranking and leaderboard functionality for signal sources."""
     
-    def __init__(self, uow: UnitOfWork) -> None:
-        self._statistics_service = StatisticsService(uow)
+    def __init__(self, uow_factory: callable) -> None:
+        self._statistics_service = StatisticsService(uow_factory)
         self._scoring_service = ScoringService(self._statistics_service)
         self._validator = ScoringValidator()
-        self._uow = uow
+        self._uow_factory = uow_factory
 
     @PerformanceMonitor.monitor_performance("get_score_leaderboard")
     async def get_score_leaderboard(
@@ -354,10 +354,10 @@ class AnalyticsRanking:
 
     async def _get_source_names(self, source_ids: List[int]) -> Dict[int, str]:
         """Get source names for display."""
-        async with self._uow:
+        async with self._uow_factory() as uow:
             sources = []
             for source_id in source_ids:
-                source = await self._uow.signal_sources.get(source_id)
+                source = await uow.signal_sources.get(source_id)
                 if source:
                     sources.append(source)
             

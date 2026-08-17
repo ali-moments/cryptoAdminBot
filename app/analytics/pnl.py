@@ -22,8 +22,8 @@ from app.services.validation import ScoringValidator, ScoringValidationError
 class PnlAnalytics:
     """Calculate PNL for channel signals (analytics/reporting only)."""
     
-    def __init__(self, uow: UnitOfWork, price_cache: PriceCache) -> None:
-        self._uow = uow
+    def __init__(self, uow_factory: callable, price_cache: PriceCache) -> None:
+        self._uow_factory = uow_factory
         self._price_cache = price_cache
         self._validator = ScoringValidator()
     
@@ -76,14 +76,14 @@ class PnlAnalytics:
         tp_count = 0  # Count of signals that hit TP
         stop_count = 0  # Count of signals that hit STOP
         
-        async with self._uow:
+        async with self._uow_factory() as uow:
             # Get ALL trackings (active + closed) for signals created in period
-            all_trackings = await self._uow.trackings.get_by_signal_creation_window(start, end)
+            all_trackings = await uow.trackings.get_by_signal_creation_window(start, end)
             logger.debug(f"Found {len(all_trackings)} trackings for PNL calculation in window {start} to {end}")
             
             # Process each tracking
             for tracking in all_trackings:
-                pnl_item = await self._build_pnl_item(tracking)
+                pnl_item = await self._build_pnl_item(tracking, uow)
                 if pnl_item:
                     items.append(pnl_item)
                     
@@ -108,12 +108,12 @@ class PnlAnalytics:
         logger.info(f"PNL calculation complete: {len(items)} items, total PNL: {total_pnl:.2f}%, win rate: {win_rate:.1f}% ({tp_count}/{total_closed_signals})")
         return PnlDTO(items=items, total=total_pnl, win_rate=win_rate)
     
-    async def _build_pnl_item(self, tracking) -> Optional[PNLItem]:
+    async def _build_pnl_item(self, tracking, uow) -> Optional[PNLItem]:
         """Build PNL item for any tracking (active or closed)."""
         signal = tracking.signal
         
         # Get signal message
-        signal_msg = await self._uow.telegram_messages.signal_message(signal.id)
+        signal_msg = await uow.telegram_messages.signal_message(signal.id)
         signal_msg_id = signal_msg.message_id if signal_msg else 0
         
         # Skip cancelled/expired signals
@@ -128,7 +128,7 @@ class PnlAnalytics:
             status = f"TP{highest_tp}"
             
             # Get TARGET_HIT messages to find corresponding message ID
-            tp_messages = await self._uow.telegram_messages.get_target_hit_messages(tracking.id)
+            tp_messages = await uow.telegram_messages.get_target_hit_messages(tracking.id)
             if len(tp_messages) >= highest_tp:
                 status_msg_id = tp_messages[highest_tp - 1].message_id
             else:
@@ -144,7 +144,7 @@ class PnlAnalytics:
         elif (tracking.close_reason in (CloseReason.ORIGINAL_STOP_LOSS, CloseReason.MOVED_STOP_LOSS)):
             # Stop loss hit
             status = "STOP"
-            close_msg = await self._uow.telegram_messages.get_close_message(tracking.id)
+            close_msg = await uow.telegram_messages.get_close_message(tracking.id)
             status_msg_id = close_msg.message_id if close_msg else None
             pnl = tracking.profit_percent or Decimal("0")
             

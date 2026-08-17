@@ -160,8 +160,7 @@ class AppScheduler:
         _pnl_analytics = self._pnl_analytics
         
         # Initialize scoring integration service
-        uow = UnitOfWork()
-        _scoring_integration_service = ScoringIntegrationService(uow)
+        _scoring_integration_service = ScoringIntegrationService(UnitOfWork)
 
         # Create synchronous database URL for APScheduler (it doesn't support async drivers)
         sync_db_url = settings.alembic_database_url
