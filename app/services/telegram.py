@@ -158,6 +158,7 @@ class TelegramService:
             signal_id=tracking.signal_id,
             tracking_id=tracking.id,
             telegram_message_type=MessageType.SIGNAL.value,
+            uow=uow,
         )
         
         if success:
@@ -190,6 +191,7 @@ class TelegramService:
             signal_id=tracking.signal_id,
             tracking_id=tracking.id,
             telegram_message_type=MessageType.SIGNAL_CLOSED.value,
+            uow=uow,
         )
 
         return success
@@ -223,6 +225,7 @@ class TelegramService:
             signal_id=tracking.signal_id,
             tracking_id=tracking.id,
             telegram_message_type=message_type,
+            uow=uow,
         )
 
         return success
@@ -282,6 +285,7 @@ class TelegramService:
             signal_id=tracking.signal_id,
             tracking_id=tracking.id,
             telegram_message_type=MessageType.TARGET_HIT.value,
+            uow=uow,
         )
 
         # Don't clean up file here - let queue processor handle it after sending
@@ -318,6 +322,7 @@ class TelegramService:
             signal_id=tracking.signal_id,
             tracking_id=tracking.id,
             telegram_message_type=MessageType.SIGNAL_CANCELLED.value,
+            uow=uow,
         )
 
         return success
@@ -351,6 +356,7 @@ class TelegramService:
             signal_id=tracking.signal_id,
             tracking_id=tracking.id,
             telegram_message_type=MessageType.SIGNAL_CLOSED.value,
+            uow=uow,
         )
 
         return success

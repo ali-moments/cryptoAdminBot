@@ -54,10 +54,12 @@ class TelegramSender:
         signal_id: int | None = None,
         tracking_id: int | None = None,
         telegram_message_type: str | None = None,
+        uow: "UnitOfWork | None" = None,
     ) -> bool:
         """Queue a text message for sending"""
         try:
-            async with self._uow_factory() as uow:
+            if uow:
+                # Use provided UnitOfWork (no commit - caller handles it)
                 await uow.telegram_queue.create(
                     channel_id=channel_id,
                     message=message,
@@ -68,8 +70,22 @@ class TelegramSender:
                     tracking_id=tracking_id,
                     telegram_message_type=telegram_message_type,
                 )
-                await uow.commit()
                 return True
+            else:
+                # Use separate UnitOfWork with commit
+                async with self._uow_factory() as new_uow:
+                    await new_uow.telegram_queue.create(
+                        channel_id=channel_id,
+                        message=message,
+                        reply_to=reply_to,
+                        file_path=None,
+                        message_type="text",
+                        signal_id=signal_id,
+                        tracking_id=tracking_id,
+                        telegram_message_type=telegram_message_type,
+                    )
+                    await new_uow.commit()
+                    return True
         except Exception as e:
             logger.error(f"Failed to queue message: {e}")
             return False
@@ -83,10 +99,12 @@ class TelegramSender:
         signal_id: int | None = None,
         tracking_id: int | None = None,
         telegram_message_type: str | None = None,
+        uow: "UnitOfWork | None" = None,
     ) -> bool:
         """Queue a file message for sending"""
         try:
-            async with self._uow_factory() as uow:
+            if uow:
+                # Use provided UnitOfWork (no commit - caller handles it)
                 await uow.telegram_queue.create(
                     channel_id=channel_id,
                     message=message,
@@ -97,8 +115,22 @@ class TelegramSender:
                     tracking_id=tracking_id,
                     telegram_message_type=telegram_message_type,
                 )
-                await uow.commit()
                 return True
+            else:
+                # Use separate UnitOfWork with commit
+                async with self._uow_factory() as new_uow:
+                    await new_uow.telegram_queue.create(
+                        channel_id=channel_id,
+                        message=message,
+                        reply_to=reply_to,
+                        file_path=file_path,
+                        message_type="file",
+                        signal_id=signal_id,
+                        tracking_id=tracking_id,
+                        telegram_message_type=telegram_message_type,
+                    )
+                    await new_uow.commit()
+                    return True
         except Exception as e:
             logger.error(f"Failed to queue file: {e}")
             return False
