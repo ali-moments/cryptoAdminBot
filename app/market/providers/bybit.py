@@ -212,6 +212,11 @@ class BybitProvider(BaseProvider):
         try:
             data = orjson.loads(message)
 
+            logger.trace(
+                "BYBIT_RAW_MESSAGE: {}",
+                data,
+            )
+
             # subscribe/unsubscribe ack or ping
             if "op" in data:
                 if data["op"] == "subscribe":
@@ -221,14 +226,18 @@ class BybitProvider(BaseProvider):
                     )
                 elif data["op"] == "ping":
                     # respond to ping
+                    logger.debug("BYBIT_PING_RECEIVED - sending pong")
                     if self._ws:
                         await self._ws.send(
                             orjson.dumps({"op": "pong"}).decode(),
                         )
+                        logger.debug("BYBIT_PONG_SENT")
                 return
 
             # market data update
             if "topic" in data and data["topic"].startswith("tickers."):
+                logger.debug(f"BYBIT_TICKER_RECEIVED: {data['topic']} - {data}")
+                
                 tick_data = data["data"]
 
                 # Bybit sends "lastPrice" in snapshot and "price" in delta updates
@@ -237,6 +246,7 @@ class BybitProvider(BaseProvider):
 
                 if not price_str:
                     # Delta update without price change - skip silently
+                    logger.trace(f"BYBIT_DELTA_SKIP: {tick_data['symbol']} - no price in update: {tick_data}")
                     return
 
                 tick = PriceTick(
@@ -255,10 +265,12 @@ class BybitProvider(BaseProvider):
                     )
                 )
 
-                # logger.trace(
-                #     "Bybit market update: {}",
-                #     data,
-                # )
+                logger.info(
+                    "BYBIT_PRICE_UPDATE: {} @ {} (age: {}ms)",
+                    tick.symbol,
+                    tick.price,
+                    int(data["ts"]) - int(datetime.now(UTC).timestamp() * 1000),
+                )
 
         except Exception:
             logger.exception(

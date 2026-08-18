@@ -1,7 +1,7 @@
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from typing import Any
-
+from loguru import logger
 
 EventHandler = Callable[[Any], Awaitable[None]]
 
@@ -32,5 +32,6 @@ class EventDispatcher:
         self,
         event: Any,
     ) -> None:
+        logger.debug(f"EVENT_DISPATCH: {type(event).__name__} to {len(self._handlers[type(event)])} handlers")
         for handler in self._handlers[type(event)]:
             await handler(event)

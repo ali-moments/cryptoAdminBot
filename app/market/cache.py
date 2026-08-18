@@ -1,3 +1,4 @@
+from loguru import logger
 from app.market.dto import PriceTick
 from app.market.events import PriceUpdatedEvent
 
@@ -10,6 +11,7 @@ class PriceCache:
         self,
         event: PriceUpdatedEvent,
     ) -> None:
+        logger.info(f"PRICE_CACHE_UPDATE: {event.tick.symbol} @ {event.tick.price} from {event.tick.provider.value}")
         self._prices[event.tick.symbol] = event.tick
 
     def get(

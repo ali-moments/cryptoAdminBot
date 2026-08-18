@@ -192,10 +192,10 @@ class BinanceProvider(BaseProvider):
 
         try:
             async for message in self._ws:
-                # logger.trace(
-                #     "Binance raw message: {}",
-                #     message,
-                # )
+                logger.trace(
+                    "BINANCE_RAW_MESSAGE: {}",
+                    message,
+                )
 
                 await self._handle_message(message)
 
@@ -224,10 +224,10 @@ class BinanceProvider(BaseProvider):
         try:
             data = orjson.loads(message)
 
-            # logger.trace(
-            #     "Binance parsed message: {}",
-            #     data,
-            # )
+            logger.trace(
+                "BINANCE_PARSED_MESSAGE: {}",
+                data,
+            )
 
             # subscribe/unsubscribe ack
             if "result" in data:
@@ -236,6 +236,9 @@ class BinanceProvider(BaseProvider):
                     data,
                 )
                 return
+
+            # Market data (bookTicker)
+            logger.debug(f"BINANCE_TICKER_RECEIVED: {data.get('s', 'UNKNOWN')} - {data}")
 
             tick = PriceTick(
                 provider=self.name,
@@ -253,10 +256,12 @@ class BinanceProvider(BaseProvider):
                 )
             )
 
-            # logger.trace(
-            #     "Binance market update: {}",
-            #     data,
-            # )
+            logger.info(
+                "BINANCE_PRICE_UPDATE: {} @ {} (ts: {})",
+                tick.symbol,
+                tick.price,
+                data["E"],
+            )
 
         except Exception:
             logger.exception(
