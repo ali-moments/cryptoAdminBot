@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from loguru import logger
 
 from app.database.uow import UnitOfWork
 from app.telegram.parsers.bulls_signal import BullsSignalParser
@@ -135,6 +136,8 @@ def build_application() -> Application:
         fallback=Provider.BYBIT,
         disaster=Provider.OKX,
     )
+    logger.info(f"MANAGER_CREATED: ProviderManager instance created, manager_id={id(market_manager)}")
+    logger.info(f"PROVIDER_IDS: BINANCE={id(providers[Provider.BINANCE])}, BYBIT={id(providers[Provider.BYBIT])}, OKX={id(providers[Provider.OKX])}")
 
     # Engine components
     tracker = Tracker()

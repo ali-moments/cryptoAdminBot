@@ -41,6 +41,7 @@ class BybitProvider(BaseProvider):
         self._ws = await connect(settings.bybit_ws)
 
         self._connected = True
+        logger.info(f"BYBIT_CONNECT_SEQUENCE: _connected set to True, provider_id={id(self)}")
 
         logger.info(
             "Bybit websocket connected"
@@ -54,6 +55,7 @@ class BybitProvider(BaseProvider):
         self,
     ) -> None:
         self._connected = False
+        logger.info(f"BYBIT_MANUAL_DISCONNECT: _connected set to False, provider_id={id(self)}")
 
         if self._receive_task:
             self._receive_task.cancel()
@@ -200,6 +202,7 @@ class BybitProvider(BaseProvider):
 
         finally:
             self._connected = False
+            logger.warning(f"BYBIT_DISCONNECT_SEQUENCE: _connected set to False, provider_id={id(self)}, active_provider={getattr(self, '_active', 'N/A')}")
 
             logger.warning(
                 "Bybit websocket disconnected"

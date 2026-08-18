@@ -42,10 +42,13 @@ class ProviderManager:
         fallback: Provider = Provider.BYBIT,
         disaster: Provider = Provider.OKX,
     ) -> None:
+        logger.info(f"MANAGER_INIT: Creating ProviderManager instance, manager_id={id(self)}")
+        
         self._dispatcher = dispatcher
         self._cache = cache
 
         self._providers = providers
+        logger.info(f"MANAGER_PROVIDERS_MAP: {[(k.value, id(v)) for k, v in providers.items()]}")
 
         self._primary = primary
         self._fallback = fallback
@@ -53,6 +56,7 @@ class ProviderManager:
 
         self._active = primary
         self._target = primary  # The provider we want to be using
+        logger.info(f"MANAGER_INITIAL_ACTIVE: active={self._active.value}")
 
         # Track subscriptions (symbol -> reference count)
         self._subscriptions: dict[str, int] = {}
@@ -522,6 +526,11 @@ class ProviderManager:
             try:
                 await asyncio.sleep(self.HEALTH_CHECK_INTERVAL)
                 logger.trace('provider health check happened!')
+                
+                # Log state before check
+                active_provider_instance = self.active_provider
+                is_connected_value = active_provider_instance.is_connected
+                logger.info(f"HEALTH_CHECK_STATE: active={self._active.value}, provider_id={id(active_provider_instance)}, is_connected={is_connected_value}, manager_id={id(self)}")
 
                 if not self.active_provider.is_connected:
                     logger.warning(f"Active provider {self._active.value} disconnected")
