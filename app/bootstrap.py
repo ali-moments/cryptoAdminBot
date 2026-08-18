@@ -24,14 +24,12 @@ from app.services.telegram import TelegramService
 from app.telegram.sender.client import TelegramSender
 from app.telegram.sender.formatter import TelegramFormatter
 from app.services.settings import States
+from app.config.settings import settings
 from app.services.svg import SvgService
 from app.market.cache import PriceCache
-from app.market.dispatcher import EventDispatcher
 from app.market.manager import ProviderManager
-from app.market.providers.binance import BinanceProvider
-from app.market.providers.bybit import BybitProvider
-from app.market.providers.okx import OKXProvider
-from app.market.events import PriceUpdatedEvent, ProviderChangedEvent
+from app.market.registry import ProviderRegistry
+
 from app.database.enums import Provider
 from app.engine.tracking_manager import TrackingManager
 from app.engine.tracker import Tracker
@@ -115,26 +113,25 @@ def build_application() -> Application:
     lifecycle = SignalLifecycleService(states=states, telegram_service=telegram_service)
 
     # Market components
-    dispatcher = EventDispatcher()
     price_cache = PriceCache()
 
-    # Subscribe price cache to price update events
-    dispatcher.subscribe(PriceUpdatedEvent, price_cache.on_price_updated)
-
-    # Create market providers
-    providers = {
-        Provider.BINANCE: BinanceProvider(dispatcher),
-        Provider.BYBIT: BybitProvider(dispatcher),
-        Provider.OKX: OKXProvider(dispatcher),
-    }
+    # Create market providers with polling intervals
+    providers = ProviderRegistry.create_all_providers(
+        cache=price_cache,
+        polling_intervals={
+            Provider.BINANCE: settings.binance_polling_interval,
+            Provider.BYBIT: settings.bybit_polling_interval,
+            Provider.OKX: settings.okx_polling_interval,
+        }
+    )
 
     market_manager = ProviderManager(
-        dispatcher=dispatcher,
         cache=price_cache,
         providers=providers,
         primary=Provider.BINANCE,
         fallback=Provider.BYBIT,
         disaster=Provider.OKX,
+        consecutive_miss_threshold=settings.consecutive_miss_threshold,
     )
     logger.info(f"MANAGER_CREATED: ProviderManager instance created, manager_id={id(market_manager)}")
     logger.info(f"PROVIDER_IDS: BINANCE={id(providers[Provider.BINANCE])}, BYBIT={id(providers[Provider.BYBIT])}, OKX={id(providers[Provider.OKX])}")
@@ -150,11 +147,10 @@ def build_application() -> Application:
         tracker=tracker,
         processor=action_processor,
         cache=price_cache,
-        interval=2.0,  # 2-second polling as per architecture
+        interval=7.0,  # 5-second polling as per REST API design
     )
 
-    # Subscribe tracking manager to provider change events
-    dispatcher.subscribe(ProviderChangedEvent, tracking_manager.on_provider_changed)
+
 
     subscription_manager = SubscriptionManager(
         uow_factory=UnitOfWork,

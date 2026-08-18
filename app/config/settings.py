@@ -45,9 +45,11 @@ class Settings(BaseSettings):
     # Market
     # =========================
 
-    binance_ws: str = Field(alias="BINANCE_WS")
-    bybit_ws: str = Field(alias="BYBIT_WS")
-    okx_ws: str = Field(alias="OKX_WS")
+    # Market polling configuration
+    binance_polling_interval: float = Field(alias="BINANCE_POLLING_INTERVAL", default=4.0)
+    bybit_polling_interval: float = Field(alias="BYBIT_POLLING_INTERVAL", default=4.0)  
+    okx_polling_interval: float = Field(alias="OKX_POLLING_INTERVAL", default=5.0)
+    consecutive_miss_threshold: int = Field(alias="CONSECUTIVE_MISS_THRESHOLD", default=2)
 
     # =========================
     # Engine

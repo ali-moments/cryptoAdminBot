@@ -9,7 +9,7 @@ from app.database.enums import TrackingStatus, Direction
 from app.engine.tracker import Tracker
 from app.market.cache import PriceCache
 from app.engine.action_processor import ActionProcessor
-from app.market.events import ProviderChangedEvent
+
 
 
 class TrackingManager:
@@ -25,7 +25,7 @@ class TrackingManager:
         tracker: Tracker,
         processor: ActionProcessor,
         cache: PriceCache,
-        interval: float = 2.0,
+        interval: float = 7.0,
     ) -> None:
         self._uow_factory = uow_factory
         self._tracker = tracker
@@ -54,22 +54,7 @@ class TrackingManager:
         self._initialized_trackings.clear()
         logger.info(f"Reset initialization state for {count} trackings - will re-initialize on next tick")
 
-    async def on_provider_changed(self, event: ProviderChangedEvent) -> None:
-        """Handle provider change events.
-        
-        FIXED: Don't reset initialization state for provider changes.
-        
-        Provider changes are infrastructure-level events that shouldn't affect
-        the business logic layer. Trackings should continue normal processing
-        with the new price data source without interruption.
-        
-        The previous approach of clearing _initialized_trackings was causing
-        trackings to get stuck in re-initialization loops, missing actions
-        like TP hits that should have been processed normally.
-        """
-        logger.info(f"Provider changed from {event.previous.value} to {event.current.value} - continuing normal processing")
-        # No state reset needed - let trackings continue normal processing
-    
+
 
     async def start(
         self,

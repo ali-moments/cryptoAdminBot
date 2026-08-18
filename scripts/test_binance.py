@@ -1,78 +1,73 @@
-"""Test script for Binance provider."""
+"""Test script for REST market system."""
 import asyncio
 from loguru import logger
 
 from app.database.enums import Provider
 from app.market.cache import PriceCache
-from app.market.dispatcher import EventDispatcher
 from app.market.manager import ProviderManager
-from app.market.providers.binance import BinanceProvider
-from app.market.events import PriceUpdatedEvent
+from app.market.registry import ProviderRegistry
 from app.config.logging import setup_logging
 
 
 async def main() -> None:
-    """Test Binance provider."""
+    """Test REST market system with Binance."""
     logger.info("=" * 70)
-    logger.info("TESTING BINANCE PROVIDER")
+    logger.info("TESTING REST MARKET SYSTEM - BINANCE")
     logger.info("=" * 70)
 
-    dispatcher = EventDispatcher()
+    # Create cache and providers using new REST architecture
     cache = PriceCache()
-
-    dispatcher.subscribe(
-        PriceUpdatedEvent,
-        cache.on_price_updated,
+    providers = ProviderRegistry.create_all_providers(
+        cache=cache,
+        polling_intervals={
+            Provider.BINANCE: 2.0,  # Fast polling for testing
+            Provider.BYBIT: 3.0,
+            Provider.OKX: 4.0,
+        }
     )
 
     manager = ProviderManager(
-        dispatcher=dispatcher,
         cache=cache,
-        providers={
-            Provider.BINANCE: BinanceProvider(dispatcher),
-        },
+        providers=providers,
         primary=Provider.BINANCE,
+        fallback=Provider.BYBIT,
+        disaster=Provider.OKX,
+        consecutive_miss_threshold=2,
+        check_interval=1.0,  # Fast failover for testing
     )
 
     await manager.start()
-    logger.info("Binance manager started.")
+    logger.info("REST market manager started.")
 
-    # Subscribe to BTC
-    await manager.subscribe("BTCUSDT")
-    logger.info("Subscribed to BTCUSDT")
+    # Add symbols to track
+    await manager.sync({"BTCUSDT", "ETHUSDT"})
+    logger.info("Added BTCUSDT and ETHUSDT to tracking")
 
-    # Monitor BTC for 5 seconds
-    for i in range(5):
+    # Monitor for 10 seconds
+    logger.info("Monitoring prices for 10 seconds...")
+    for i in range(10):
         await asyncio.sleep(1)
-        tick = manager.get_price("BTCUSDT")
-        if tick:
-            logger.success(f"BTC [{i+1}/5]: {tick.symbol} = {tick.price}")
-        else:
-            logger.warning(f"BTC [{i+1}/5]: No data yet")
-
-    # Subscribe to ETH
-    await manager.subscribe("ETHUSDT")
-    logger.info("Subscribed to ETHUSDT")
-
-    # Monitor both BTC and ETH for 5 seconds
-    for i in range(5):
-        await asyncio.sleep(1)
+        
         btc_tick = manager.get_price("BTCUSDT")
         eth_tick = manager.get_price("ETHUSDT")
 
         if btc_tick:
-            logger.success(f"BTC [{i+1}/5]: {btc_tick.symbol} = {btc_tick.price}")
+            logger.success(f"[{i+1}/10] BTC: ${btc_tick.price} from {btc_tick.provider.value}")
+        else:
+            logger.warning(f"[{i+1}/10] BTC: No data yet")
+            
         if eth_tick:
-            logger.success(f"ETH [{i+1}/5]: {eth_tick.symbol} = {eth_tick.price}")
+            logger.success(f"[{i+1}/10] ETH: ${eth_tick.price} from {eth_tick.provider.value}")
+        else:
+            logger.warning(f"[{i+1}/10] ETH: No data yet")
 
-    # Unsubscribe from both
-    await manager.unsubscribe("BTCUSDT")
-    await manager.unsubscribe("ETHUSDT")
-    logger.info("Unsubscribed from BTCUSDT and ETHUSDT")
+    # Remove symbols
+    await manager.sync(set())
+    logger.info("Removed all symbols from tracking")
 
     # Stop the manager
     await manager.stop()
-    logger.success("Binance test completed!")
+    logger.success("REST market test completed!")
 
 
 if __name__ == "__main__":
