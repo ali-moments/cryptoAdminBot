@@ -53,22 +53,20 @@ class ActionProcessor:
         if not actions:
             return
 
-        # # Log actions to be processed
-        # action_names = [action.__class__.__name__ for action in actions]
-        # logger.info(f"ACTION PROCESSING: {tracking.signal.symbol} (tracking_id={tracking.id}) - {len(actions)} actions: {', '.join(action_names)}")
+        # Log actions to be processed
+        action_names = [action.__class__.__name__ for action in actions]
+        logger.info(f"ACTION_PROCESSING_START: {tracking.signal.symbol} (tracking_id={tracking.id}) - {len(actions)} actions: {', '.join(action_names)}")
 
         for action in actions:
             # Check if already processed
             if await self._is_already_processed(tracking, action, uow):
-                # logger.debug(
-                #     "Action already processed, skipping: tracking=%d action=%s",
-                #     tracking.id,
-                #     action.__class__.__name__,
-                # )
+                logger.debug(
+                    f"ACTION_SKIP: Already processed - tracking={tracking.id} action={action.__class__.__name__}",
+                )
                 continue
 
-            # # Log individual action processing
-            # logger.info(f"PROCESSING ACTION: {action.__class__.__name__} for {tracking.signal.symbol}")
+            # Log individual action processing
+            logger.info(f"ACTION_PROCESS: {action.__class__.__name__} for {tracking.signal.symbol} (tracking_id={tracking.id})")
 
             # Route to handler
             match action:

@@ -99,16 +99,22 @@ class TrackingManager:
     async def _run(
         self,
     ) -> None:
+        logger.info("TRACKING_MANAGER: Main processing loop started")
+        loop_count = 0
         while True:
             try:
+                loop_count += 1
+                logger.debug(f"TICK_LOOP: Starting tick #{loop_count}")
                 await self._tick()
+                logger.trace(f"TICK_LOOP: Completed tick #{loop_count}")
             except asyncio.CancelledError:
                 # Preserve shutdown behavior
+                logger.info("TRACKING_MANAGER: Processing loop cancelled")
                 raise
             except Exception:
                 # Log error and continue to next tick
                 # This prevents single failures from stopping the engine
-                logger.exception("Tick failed, continuing to next tick")
+                logger.exception(f"TICK_LOOP: Tick #{loop_count} failed, continuing to next tick")
 
             await asyncio.sleep(
                 self._interval,
@@ -131,6 +137,9 @@ class TrackingManager:
         async with self._uow_factory() as uow:
             # Load all active trackings - objects are attached to session
             trackings = await uow.trackings.get_active()
+            
+            # Log tick cycle start for debugging
+            logger.info(f"TICK_CYCLE_START: Processing {len(trackings)} active trackings")
 
             # Group by symbol for efficient tick lookup
             grouped: dict[str, list] = defaultdict(list)
@@ -168,11 +177,12 @@ class TrackingManager:
                         if init_actions:
                             # Initialization emitted actions (state transition)
                             # Process them and skip normal rules THIS cycle
-                            logger.debug(f"Processing {len(init_actions)} initialization actions for {symbol}")
+                            logger.info(f"INIT_ACTIONS: Processing {len(init_actions)} initialization actions for {symbol} (tracking_id={tracking.id})")
                             await self._processor.process(tracking, init_actions, uow)
                             continue  # Move to next tracking
 
                         # Initialization emitted nothing - fall through to normal rules
+                        logger.info(f"INIT_COMPLETE: No initialization actions for {symbol} (tracking_id={tracking.id}) - proceeding to normal rules")
                     else:
                         # Tracking already initialized in this session
                         logger.trace(f"TRACKING ACTIVE: {symbol} (tracking_id={tracking.id}, status={tracking.status.value})")
@@ -180,6 +190,8 @@ class TrackingManager:
                     # ================================================
                     # NORMAL PROCESSING
                     # ================================================
+                    
+                    logger.debug(f"RULES_START: Executing rules for {symbol} (tracking_id={tracking.id})")
                     
                     # Tracker updates runtime state (peak price, halfway flag)
                     # These modifications are tracked by SQLAlchemy
@@ -211,11 +223,14 @@ class TrackingManager:
                                     logger.error(f"MISSED_ACTION_DIAGNOSTIC: {symbol} (tracking_id={tracking.id}) - Price {current_price} is in action range (TP1: {tp1_price}, SL: {sl_price}) but no actions generated! Direction: {signal.direction.value}, Peak: {tracking.peak_price_after_entry}")
                             
                             # Safety net logging for all TRACKING trackings with no actions
-                            logger.warning(f"TRACKING_SAFETY_NET: No actions generated for TRACKING status {symbol} (tracking_id={tracking.id}) - price: {current_price}, peak: {tracking.peak_price_after_entry}")
+                            logger.info(f"TRACKING_SAFETY_NET: No actions generated for TRACKING status {symbol} (tracking_id={tracking.id}) - price: {current_price}, peak: {tracking.peak_price_after_entry}")
+                        else:
+                            logger.trace(f"NO_ACTIONS: {symbol} (tracking_id={tracking.id}, status={tracking.status.value}) - no actions generated")
                         continue
 
                     # ActionProcessor processes actions
                     # Mutates the same tracking object
+                    logger.info(f"ACTIONS_GENERATED: {symbol} (tracking_id={tracking.id}) - {len(actions)} actions: {[a.__class__.__name__ for a in actions]}")
                     await self._processor.process(
                         tracking,
                         actions,
@@ -224,6 +239,7 @@ class TrackingManager:
 
             # Commit all changes atomically
             await uow.commit()
+            logger.info(f"TICK_CYCLE_END: Committed all changes for {len(trackings)} trackings")
 
     async def _initialize_tracking(self, tracking, tick):
         """Perform startup observation for this tracking.
