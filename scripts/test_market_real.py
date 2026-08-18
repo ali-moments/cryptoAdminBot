@@ -58,7 +58,6 @@ class MarketTester:
             "BTCUSDT", "ETHUSDT", "ADAUSDT", "DOTUSDT", "LINKUSDT",
             "UNIUSDT", "LTCUSDT", "BCHUSDT", "XLMUSDT", "VETUSDT",
             "TRXUSDT", "EOSUSDT", "XRPUSDT", "BNBUSDT", "SOLUSDT",
-            "AVAXUSDT", "MATICUSDT", "FTMUSDT", "ATOMUSDT", "ALGOUSDT"
         ]
         
         self.stats = {

@@ -25,6 +25,7 @@ class ProviderManager:
     RECONNECT_DELAY = 3  # seconds between reconnection attempts
     HEALTH_CHECK_INTERVAL = 7  # seconds between health checks
     GRACE_PERIOD = 12  # Grace period after connection (increased for better stability)
+    INITIAL_DATA_TIMEOUT = 2.5 # Wait for connection and initial data to establish
 
     def __init__(
         self,
@@ -238,7 +239,7 @@ class ProviderManager:
             await provider_instance.connect()
 
             # Wait for connection and initial data to establish
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(self.INITIAL_DATA_TIMEOUT)
 
             if provider_instance.is_connected:
                 self._active = provider
