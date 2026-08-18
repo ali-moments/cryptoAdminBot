@@ -1,10 +1,11 @@
 import asyncio
 from collections import defaultdict
 from collections.abc import Callable
+from datetime import datetime, UTC
 
 from loguru import logger
 from app.database.uow import UnitOfWork
-from app.database.enums import TrackingStatus
+from app.database.enums import TrackingStatus, Direction
 from app.engine.tracker import Tracker
 from app.market.cache import PriceCache
 from app.engine.action_processor import ActionProcessor
@@ -54,18 +55,21 @@ class TrackingManager:
         logger.info(f"Reset initialization state for {count} trackings - will re-initialize on next tick")
 
     async def on_provider_changed(self, event: ProviderChangedEvent) -> None:
-        """Handle provider change events by resetting tracking initialization state.
+        """Handle provider change events.
         
-        Currently resets ALL tracking initialization state as a conservative approach.
-        This ensures all trackings are re-evaluated after provider changes, which
-        prevents missed actions but may cause some redundant reinitialization.
+        FIXED: Don't reset initialization state for provider changes.
         
-        The alternative would be to track which provider each tracking uses and only
-        reset those affected by the change, but this adds complexity without clear
-        benefit since reinitialization is designed to be idempotent.
+        Provider changes are infrastructure-level events that shouldn't affect
+        the business logic layer. Trackings should continue normal processing
+        with the new price data source without interruption.
+        
+        The previous approach of clearing _initialized_trackings was causing
+        trackings to get stuck in re-initialization loops, missing actions
+        like TP hits that should have been processed normally.
         """
-        logger.info(f"Provider changed from {event.previous.value} to {event.current.value} - resetting tracking initialization")
-        self.reset_initialization_state()
+        logger.info(f"Provider changed from {event.previous.value} to {event.current.value} - continuing normal processing")
+        # No state reset needed - let trackings continue normal processing
+    
 
     async def start(
         self,
@@ -141,6 +145,10 @@ class TrackingManager:
                     logger.trace(f"No market data available for {symbol}, skipping processing")
                     continue
 
+                # Always log tick age for staleness monitoring
+                tick_age_seconds = (datetime.now(UTC) - tick.timestamp).total_seconds()
+                logger.info(f"TICK_AGE: {symbol} - age: {tick_age_seconds:.1f}s, price: {tick.price}, provider: {tick.provider.value}")
+
                 # Process each tracking
                 for tracking in symbol_trackings:
                     # ================================================
@@ -164,15 +172,15 @@ class TrackingManager:
                             await self._processor.process(tracking, init_actions, uow)
                             continue  # Move to next tracking
 
-                        # Initialization emitted nothing
-                        # Fall through to normal rules
-                    # else:
-                    #     # Tracking already initialized in this session
-                    #     logger.trace(f"TRACKING ACTIVE: {symbol} (tracking_id={tracking.id}, status={tracking.status.value})")
+                        # Initialization emitted nothing - fall through to normal rules
+                    else:
+                        # Tracking already initialized in this session
+                        logger.trace(f"TRACKING ACTIVE: {symbol} (tracking_id={tracking.id}, status={tracking.status.value})")
 
                     # ================================================
                     # NORMAL PROCESSING
                     # ================================================
+                    
                     # Tracker updates runtime state (peak price, halfway flag)
                     # These modifications are tracked by SQLAlchemy
                     actions = await self._tracker.track(
@@ -181,6 +189,29 @@ class TrackingManager:
                     )
 
                     if not actions:
+                        # Production diagnostic: Log when we should expect actions but don't get them
+                        if tracking.status == TrackingStatus.TRACKING:
+                            signal = tracking.signal
+                            current_price = tick.price
+                            
+                            # Check if this could be a missed TP/SL opportunity
+                            if signal.targets and len(signal.targets) > 0:
+                                tp1_price = tracking.current_tp1_price if tracking.current_tp1_price else signal.targets[0].price
+                                sl_price = signal.stop_loss
+                                
+                                # Check if price is in action range
+                                if signal.direction == Direction.LONG:
+                                    in_tp_range = current_price >= tp1_price
+                                    in_sl_range = current_price <= sl_price
+                                else:
+                                    in_tp_range = current_price <= tp1_price  
+                                    in_sl_range = current_price >= sl_price
+                                
+                                if in_tp_range or in_sl_range:
+                                    logger.error(f"MISSED_ACTION_DIAGNOSTIC: {symbol} (tracking_id={tracking.id}) - Price {current_price} is in action range (TP1: {tp1_price}, SL: {sl_price}) but no actions generated! Direction: {signal.direction.value}, Peak: {tracking.peak_price_after_entry}")
+                            
+                            # Safety net logging for all TRACKING trackings with no actions
+                            logger.warning(f"TRACKING_SAFETY_NET: No actions generated for TRACKING status {symbol} (tracking_id={tracking.id}) - price: {current_price}, peak: {tracking.peak_price_after_entry}")
                         continue
 
                     # ActionProcessor processes actions
