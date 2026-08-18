@@ -27,21 +27,26 @@ class CompatibilityMockProvider(BaseProvider):
         self._subscriptions: dict[str, int] = {}
         self.subscribe_calls = []
         self.unsubscribe_calls = []
+        self._should_be_healthy = True
     
     @property
     def name(self) -> Provider:
         return self._name
     
     async def connect(self) -> None:
-        self._connected = True
+        self.mark_connected()
     
     async def disconnect(self) -> None:
-        self._connected = False
+        self.mark_disconnected()
     
     async def subscribe(self, symbol: str) -> None:
         self.subscribe_calls.append(symbol)
         count = self._subscriptions.get(symbol, 0)
         self._subscriptions[symbol] = count + 1
+        
+        # Simulate receiving data immediately for healthy providers
+        if self._should_be_healthy:
+            await self._simulate_tick(symbol)
     
     async def unsubscribe(self, symbol: str) -> None:
         self.unsubscribe_calls.append(symbol)
@@ -58,6 +63,20 @@ class CompatibilityMockProvider(BaseProvider):
             price=Decimal("50000.00"),
             timestamp=datetime.now(UTC)
         )
+    
+    async def _simulate_tick(self, symbol: str):
+        """Simulate receiving a ticker for this symbol"""
+        tick = PriceTick(
+            provider=self._name,
+            symbol=symbol,
+            price=Decimal("50000.00"),
+            timestamp=datetime.now(UTC)
+        )
+        await self._publish_price(tick)
+    
+    def set_health(self, healthy: bool):
+        """Control provider health for testing"""
+        self._should_be_healthy = healthy
 
 
 @pytest.fixture
@@ -85,16 +104,18 @@ async def compatibility_manager():
         disaster=Provider.OKX,
     )
     
-    # Connect providers and start manager
-    await binance.connect()
-    await bybit.connect() 
+    # Properly start the manager
+    await manager.start()
+    
+    # Connect backup providers for tests
+    await bybit.connect()
     await okx.connect()
-    manager._active = Provider.BINANCE
-    manager._running = True
     
     yield manager, binance, bybit, okx, cache
     
-    manager._running = False
+    # Cleanup
+    if manager._running:
+        await manager.stop()
 
 
 @pytest.mark.asyncio

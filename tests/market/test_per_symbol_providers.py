@@ -43,15 +43,22 @@ class MockProvider(BaseProvider):
         return self._name
     
     async def connect(self) -> None:
-        self._connected = True
+        self.mark_connected()
     
     async def disconnect(self) -> None:
-        self._connected = False
+        self.mark_disconnected()
     
     async def subscribe(self, symbol: str) -> None:
+        # Check if symbol is supported first
+        if symbol not in self._supported_symbols:
+            raise RuntimeError(f"Symbol {symbol} not supported")
+            
         self._subscribe_calls.append(symbol)
         count = self._subscriptions.get(symbol, 0)
         self._subscriptions[symbol] = count + 1
+        
+        # Simulate receiving data for supported symbols
+        await self._simulate_tick(symbol)
     
     async def unsubscribe(self, symbol: str) -> None:
         self._unsubscribe_calls.append(symbol)
@@ -79,6 +86,16 @@ class MockProvider(BaseProvider):
             price=Decimal("50000.00"),
             timestamp=datetime.now(UTC)
         )
+    
+    async def _simulate_tick(self, symbol: str):
+        """Simulate receiving a ticker for this symbol"""
+        tick = PriceTick(
+            provider=self._name,
+            symbol=symbol,
+            price=Decimal("50000.00"),
+            timestamp=datetime.now(UTC)
+        )
+        await self._publish_price(tick)
 
 
 # ===========================================================================
@@ -111,19 +128,18 @@ async def manager_with_mocks():
         disaster=Provider.OKX,
     )
     
-    # Connect providers
-    await binance.connect()
+    # Start the manager properly
+    await manager.start()
+    
+    # Connect backup providers
     await bybit.connect()
     await okx.connect()
-    
-    # Set active provider
-    manager._active = Provider.BINANCE
-    manager._running = True
     
     yield manager, binance, bybit, okx
     
     # Cleanup
-    manager._running = False
+    if manager._running:
+        await manager.stop()
 
 
 # ===========================================================================

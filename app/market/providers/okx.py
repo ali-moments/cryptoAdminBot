@@ -8,7 +8,6 @@ from loguru import logger
 
 from app.database.enums import Provider
 from app.market.dto import PriceTick
-from app.market.events import PriceUpdatedEvent
 from app.market.providers.base import BaseProvider
 from app.config.settings import settings
 
@@ -76,7 +75,7 @@ class OKXProvider(BaseProvider):
     ) -> None:
         self._ws = await connect(settings.okx_ws)
 
-        self._connected = True
+        self.mark_connected()
 
         logger.info(
             "OKX websocket connected"
@@ -89,7 +88,7 @@ class OKXProvider(BaseProvider):
     async def disconnect(
         self,
     ) -> None:
-        self._connected = False
+        self.mark_disconnected()
 
         if self._receive_task:
             self._receive_task.cancel()
@@ -254,7 +253,7 @@ class OKXProvider(BaseProvider):
             )
 
         finally:
-            self._connected = False
+            self.mark_disconnected()
 
             logger.warning(
                 "OKX websocket disconnected"
@@ -298,11 +297,7 @@ class OKXProvider(BaseProvider):
                         ),
                     )
 
-                    await self._dispatcher.publish(
-                        PriceUpdatedEvent(
-                            tick=tick,
-                        )
-                    )
+                    await self._publish_price(tick)
 
                     # logger.trace(
                     #     "OKX market update: {} -> {}",

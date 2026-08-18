@@ -8,7 +8,6 @@ from loguru import logger
 
 from app.database.enums import Provider
 from app.market.dto import PriceTick
-from app.market.events import PriceUpdatedEvent
 from app.market.providers.base import BaseProvider
 from app.config.settings import settings
 
@@ -40,7 +39,7 @@ class BybitProvider(BaseProvider):
     ) -> None:
         self._ws = await connect(settings.bybit_ws)
 
-        self._connected = True
+        self.mark_connected()
         logger.info(f"BYBIT_CONNECT_SEQUENCE: _connected set to True, provider_id={id(self)}")
 
         logger.info(
@@ -54,7 +53,7 @@ class BybitProvider(BaseProvider):
     async def disconnect(
         self,
     ) -> None:
-        self._connected = False
+        self.mark_disconnected()
         logger.info(f"BYBIT_MANUAL_DISCONNECT: _connected set to False, provider_id={id(self)}")
 
         if self._receive_task:
@@ -201,7 +200,7 @@ class BybitProvider(BaseProvider):
             )
 
         finally:
-            self._connected = False
+            self.mark_disconnected()
             logger.warning(f"BYBIT_DISCONNECT_SEQUENCE: _connected set to False, provider_id={id(self)}, active_provider={getattr(self, '_active', 'N/A')}")
 
             logger.warning(
@@ -262,11 +261,7 @@ class BybitProvider(BaseProvider):
                     ),
                 )
 
-                await self._dispatcher.publish(
-                    PriceUpdatedEvent(
-                        tick=tick,
-                    )
-                )
+                await self._publish_price(tick)
 
                 logger.info(
                     "BYBIT_PRICE_UPDATE: {} @ {} (age: {}ms)",

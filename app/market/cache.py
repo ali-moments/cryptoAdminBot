@@ -29,6 +29,13 @@ class PriceCache:
     def clear(self) -> None:
         self._prices.clear()
 
+    def get_price(
+        self,
+        symbol: str,
+    ) -> PriceTick | None:
+        """Backward compatibility method - same as get()"""
+        return self.get(symbol)
+
     def __contains__(
         self,
         symbol: str,
