@@ -180,7 +180,7 @@ upgrade() {
     run_migrations
 
     log_info "Restarting bot with new image..."
-    docker compose up -d bot --build
+    docker compose up -d bot
 
     log_success "Upgrade completed successfully!"
     log_info "Services status:"
