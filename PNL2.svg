@@ -20,7 +20,7 @@
       }
 
       .cls-6, .cls-3, .cls-5, .cls-11 {
-        font-family: Tahoma-Bold, Tahoma;
+        font-family: Tahoma-Bold;
       }
 
       .cls-13 {
@@ -36,7 +36,7 @@
       }
 
       .cls-8, .cls-4, .cls-9, .cls-10 {
-        font-family: Tahoma, Tahoma;
+        font-family: Tahoma;
       }
 
       .cls-8, .cls-4, .cls-5 {

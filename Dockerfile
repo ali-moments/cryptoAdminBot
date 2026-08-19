@@ -11,7 +11,14 @@ RUN apt-get update \
         libcairo2-dev \
         pkg-config \
         python3-dev \
+        fontconfig \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
+
+# Install application fonts
+COPY fonts/*.ttf /usr/local/share/fonts/
+RUN fc-cache -f -v
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 

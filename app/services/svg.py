@@ -79,7 +79,7 @@ class SvgService:
         svg_bytes = etree.tostring(tree)
 
         png_path = os.path.join(self.OUTPUT_DIR, f"{uuid.uuid4().hex}.png")
-        cairosvg.svg2png(bytestring=svg_bytes, write_to=png_path, url=self.PROFIT_TEMPLATE_PATH, scale=2)
+        cairosvg.svg2png(bytestring=svg_bytes, write_to=png_path, url=self.PROFIT_TEMPLATE_PATH, scale=3)
         logger.info('profit shot generated, path: {}', png_path)
         return png_path
 
