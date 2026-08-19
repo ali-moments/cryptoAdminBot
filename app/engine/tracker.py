@@ -45,7 +45,7 @@ class Tracker:
         actions = []
 
         # 0. Signal expiry check (72-hour limit) - applies to all active signals
-        logger.trace(f"RULE_CHECK: Expiry rule for {tracking.signal.symbol} (tracking_id={tracking.id})")
+        # logger.trace(f"RULE_CHECK: Expiry rule for {tracking.signal.symbol} (tracking_id={tracking.id})")
         expiry_actions = await self._expiry.apply(
             tracking, tick, first_entry, second_entry
         )
@@ -68,7 +68,7 @@ class Tracker:
                 return actions
 
         # 2. Entry check
-        logger.trace(f"RULE_CHECK: Entry rule for {tracking.signal.symbol} (tracking_id={tracking.id})")
+        # logger.trace(f"RULE_CHECK: Entry rule for {tracking.signal.symbol} (tracking_id={tracking.id})")
         entry_actions = await self._entry.apply(
             tracking, tick, first_entry, second_entry
         )
@@ -88,7 +88,7 @@ class Tracker:
 
         # 3. Stop loss check (only if entered)
         if tracking.has_entered:
-            logger.trace(f"RULE_CHECK: Stop loss rule for {tracking.signal.symbol} (tracking_id={tracking.id})")
+            # logger.trace(f"RULE_CHECK: Stop loss rule for {tracking.signal.symbol} (tracking_id={tracking.id})")
             sl_actions = await self._stop_loss.apply(
                 tracking, tick, first_entry, second_entry
             )
@@ -100,7 +100,7 @@ class Tracker:
 
         # 4. Take profit check (only if entered and SL not hit)
         if tracking.has_entered:
-            logger.trace(f"RULE_CHECK: Take profit rule for {tracking.signal.symbol} (tracking_id={tracking.id})")
+            # logger.trace(f"RULE_CHECK: Take profit rule for {tracking.signal.symbol} (tracking_id={tracking.id})")
             tp_actions = await self._take_profit.apply(
                 tracking, tick, first_entry, second_entry
             )
@@ -112,7 +112,7 @@ class Tracker:
                     # Completed - stop
                     return actions
 
-        logger.trace(f"TRACKER_END: {tracking.signal.symbol} (tracking_id={tracking.id}) - {len(actions)} total actions")
+        # logger.trace(f"TRACKER_END: {tracking.signal.symbol} (tracking_id={tracking.id}) - {len(actions)} total actions")
         return actions
 
     def _get_ordered_entries(

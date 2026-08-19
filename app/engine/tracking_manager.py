@@ -45,7 +45,7 @@ class TrackingManager:
 
         Called after provider recovery to ensure trackings resume processing
         even if they were already initialized before the provider failure.
-        
+
         Note: This is intentionally broad - it resets ALL trackings rather than
         trying to determine which ones were affected by the provider change.
         This ensures robustness at the cost of some redundant reinitialization.
@@ -122,7 +122,7 @@ class TrackingManager:
         async with self._uow_factory() as uow:
             # Load all active trackings - objects are attached to session
             trackings = await uow.trackings.get_active()
-            
+
             # Log tick cycle start for debugging
             logger.info(f"TICK_CYCLE_START: Processing {len(trackings)} active trackings")
 
@@ -168,16 +168,16 @@ class TrackingManager:
 
                         # Initialization emitted nothing - fall through to normal rules
                         logger.info(f"INIT_COMPLETE: No initialization actions for {symbol} (tracking_id={tracking.id}) - proceeding to normal rules")
-                    else:
-                        # Tracking already initialized in this session
-                        logger.trace(f"TRACKING ACTIVE: {symbol} (tracking_id={tracking.id}, status={tracking.status.value})")
+                    # else:
+                    #     # Tracking already initialized in this session
+                    #     logger.trace(f"TRACKING ACTIVE: {symbol} (tracking_id={tracking.id}, status={tracking.status.value})")
 
                     # ================================================
                     # NORMAL PROCESSING
                     # ================================================
-                    
-                    logger.debug(f"RULES_START: Executing rules for {symbol} (tracking_id={tracking.id})")
-                    
+
+                    # logger.debug(f"RULES_START: Executing rules for {symbol} (tracking_id={tracking.id})")
+
                     # Tracker updates runtime state (peak price, halfway flag)
                     # These modifications are tracked by SQLAlchemy
                     actions = await self._tracker.track(
@@ -190,23 +190,23 @@ class TrackingManager:
                         if tracking.status == TrackingStatus.TRACKING:
                             signal = tracking.signal
                             current_price = tick.price
-                            
+
                             # Check if this could be a missed TP/SL opportunity
                             if signal.targets and len(signal.targets) > 0:
                                 tp1_price = tracking.current_tp1_price if tracking.current_tp1_price else signal.targets[0].price
                                 sl_price = signal.stop_loss
-                                
+
                                 # Check if price is in action range
                                 if signal.direction == Direction.LONG:
                                     in_tp_range = current_price >= tp1_price
                                     in_sl_range = current_price <= sl_price
                                 else:
-                                    in_tp_range = current_price <= tp1_price  
+                                    in_tp_range = current_price <= tp1_price
                                     in_sl_range = current_price >= sl_price
-                                
+
                                 if in_tp_range or in_sl_range:
                                     logger.error(f"MISSED_ACTION_DIAGNOSTIC: {symbol} (tracking_id={tracking.id}) - Price {current_price} is in action range (TP1: {tp1_price}, SL: {sl_price}) but no actions generated! Direction: {signal.direction.value}, Peak: {tracking.peak_price_after_entry}")
-                            
+
                             # Safety net logging for all TRACKING trackings with no actions
                             logger.info(f"TRACKING_SAFETY_NET: No actions generated for TRACKING status {symbol} (tracking_id={tracking.id}) - price: {current_price}, peak: {tracking.peak_price_after_entry}")
                         else:

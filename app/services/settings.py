@@ -2,8 +2,8 @@ from app.config.settings import settings
 
 class States:
     def __init__(self) -> None:
-        self.target_channel = settings.test_channel
-        self.dev_mode = True
+        self.target_channel = settings.royal_channel
+        self.dev_mode = False
         self.bot_enabled = True  # Global bot ON/OFF state
         self.emergency_entry_timeout = 3
         self.signal_entry_timeout = 2
