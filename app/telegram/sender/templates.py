@@ -288,3 +288,5 @@ class MessageTemplates:
             f'عرضی نیست طولش ندیم{emojies.GM59}</b>\n\n'
         ),
     }
+
+    TP1_CROSSED = f"تارگت زد دوستان اما ورود نداد به ما نوش جون هر کی باز کرد{emojies.TP_CROSSED1}{emojies.TP_CROSSED2}"

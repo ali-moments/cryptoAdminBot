@@ -308,6 +308,8 @@ class TelegramService:
             return False
 
         text = f"سیگنال {tracking.signal.symbol} لغو شد\nدلیل: {reason}"
+        if reason == 'tp1_crossed':
+            text = self._formatter.format_tp_crossed()
 
         # Get original signal message for reply-to
         reply_to_message_id = None

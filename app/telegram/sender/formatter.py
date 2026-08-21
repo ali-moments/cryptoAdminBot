@@ -183,3 +183,8 @@ class TelegramFormatter:
     def format_good_night(self):
         text = ''.join(self.templates.GOOD_NIGHT)
         return text
+
+    def format_tp_crossed(self) -> str:
+        text = self.templates.TP1_CROSSED
+        return text
+        
