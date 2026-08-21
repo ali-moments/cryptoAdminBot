@@ -285,6 +285,14 @@ class SignalLifecycleService:
                 f"{self.states.active_signals_limit} or more active trackings without TP hits already exist."
             )
 
+        # calculated_leverage = self._calculate_leverage(
+        #     entry=reference_entry,
+        #     stop_loss=adjusted_stop_loss,
+        #     direction=signal.direction,
+        # )
+        
+        # we keep it at 20 for some reasons
+        calculated_leverage = 20
 
         # Calculate leverage based on entries and stop loss
         if signal.direction is Direction.LONG:
@@ -332,14 +340,6 @@ class SignalLifecycleService:
                 f"Calculated (20%): {calculated_first_target}"
             )
 
-        # calculated_leverage = self._calculate_leverage(
-        #     entry=reference_entry,
-        #     stop_loss=adjusted_stop_loss,
-        #     direction=signal.direction,
-        # )
-        
-        # we keep it at 20 for some reasons
-        calculated_leverage = 20
 
         db_signal = Signal(
             source_id=source.id,
