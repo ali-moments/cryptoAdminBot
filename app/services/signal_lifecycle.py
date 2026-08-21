@@ -322,8 +322,9 @@ class SignalLifecycleService:
                 f"Adjusted: {adjusted_stop_loss} ({reduced_distance / reference_entry * 100:.2f}%)"
             )
 
-        # Calculate first target at 20% from entry price
-        target_distance = reference_entry * Decimal(0.20)  # 20% of entry price
+        # Calculate first target at (20/leverage)% from entry price
+        target_percentage = Decimal(20) / Decimal(calculated_leverage)  # e.g., 20/20 = 1%
+        target_distance = reference_entry * target_percentage / Decimal(100)  # Convert % to actual price distance
         
         if signal.direction == Direction.LONG:
             calculated_first_target = reference_entry + target_distance
@@ -337,7 +338,7 @@ class SignalLifecycleService:
             logger.info(
                 f"First target adjusted for {signal.symbol}: "
                 f"Original: {original_first_target} -> "
-                f"Calculated (20%): {calculated_first_target}"
+                f"Calculated ({target_percentage * 100:.1f}%): {calculated_first_target}"
             )
 
 

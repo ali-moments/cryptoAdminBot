@@ -181,7 +181,7 @@ class ActionProcessor:
 
             # Recalculate TP1
             # OLD Formula: new_tp1 = FirstEntry + (original_tp1 - FirstEntry) / 2
-            # NEW Formula: 20% from first entry price
+            # NEW Formula: (20/leverage)% from first entry price
             # FirstEntry is direction-dependent:
             #   - LONG: higher price (market approaches from above)
             #   - SHORT: lower price (market approaches from below)
@@ -202,8 +202,9 @@ class ActionProcessor:
                 # Calculate new TP1 (halfway between FirstEntry and original TP1)
                 # new_tp1 = first_entry_price + (original_tp1 - first_entry_price) / Decimal("2")
                 
-                # NEW FORMULA: Calculate new TP1 at 20% from first entry price
-                target_distance = first_entry_price * Decimal("0.20")  # 20% of first entry price
+                # NEW FORMULA: Calculate new TP1 at (20/leverage)% from first entry price
+                target_percentage = Decimal(20) / Decimal(signal.leverage)  # e.g., 20/20 = 1%
+                target_distance = first_entry_price * target_percentage / Decimal(100)  # Convert % to actual price distance
                 
                 if signal.direction == Direction.LONG:
                     new_tp1 = first_entry_price + target_distance
