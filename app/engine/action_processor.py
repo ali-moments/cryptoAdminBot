@@ -180,7 +180,8 @@ class ActionProcessor:
             tracking.entry2_touched = True
 
             # Recalculate TP1
-            # Formula: new_tp1 = FirstEntry + (original_tp1 - FirstEntry) / 2
+            # OLD Formula: new_tp1 = FirstEntry + (original_tp1 - FirstEntry) / 2
+            # NEW Formula: 20% from first entry price
             # FirstEntry is direction-dependent:
             #   - LONG: higher price (market approaches from above)
             #   - SHORT: lower price (market approaches from below)
@@ -197,8 +198,18 @@ class ActionProcessor:
 
                 original_tp1 = signal.targets[0].price
 
+                # OLD FORMULA (commented out):
                 # Calculate new TP1 (halfway between FirstEntry and original TP1)
-                new_tp1 = first_entry_price + (original_tp1 - first_entry_price) / Decimal("2")
+                # new_tp1 = first_entry_price + (original_tp1 - first_entry_price) / Decimal("2")
+                
+                # NEW FORMULA: Calculate new TP1 at 20% from first entry price
+                target_distance = first_entry_price * Decimal("0.20")  # 20% of first entry price
+                
+                if signal.direction == Direction.LONG:
+                    new_tp1 = first_entry_price + target_distance
+                else:
+                    new_tp1 = first_entry_price - target_distance
+                    
                 tracking.current_tp1_price = new_tp1
 
                 # Write TP1 recalculation audit log

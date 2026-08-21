@@ -294,18 +294,59 @@ class SignalLifecycleService:
             # For SHORT: use entry_low (min entry price)
             reference_entry = min(entry.price for entry in signal.entries)
 
-        calculated_leverage = self._calculate_leverage(
-            entry=reference_entry,
-            stop_loss=signal.stop_loss,
-            direction=signal.direction,
-        )
+        # Calculate stop loss percentage and adjust if needed
+        stop_percentage = abs((reference_entry - signal.stop_loss) / reference_entry * Decimal(100))
+        adjusted_stop_loss = signal.stop_loss
+        
+        if stop_percentage > Decimal(3):
+            # Reduce stop loss by 25%
+            stop_distance = abs(reference_entry - signal.stop_loss)
+            reduced_distance = stop_distance * Decimal(0.75)  # 25% reduction
+            
+            if signal.direction == Direction.LONG:
+                adjusted_stop_loss = reference_entry - reduced_distance
+            else:
+                adjusted_stop_loss = reference_entry + reduced_distance
+                
+            logger.info(
+                f"Stop loss adjusted for {signal.symbol}: "
+                f"Original: {signal.stop_loss} ({stop_percentage:.2f}%) -> "
+                f"Adjusted: {adjusted_stop_loss} ({reduced_distance / reference_entry * 100:.2f}%)"
+            )
+
+        # Calculate first target at 20% from entry price
+        target_distance = reference_entry * Decimal(0.20)  # 20% of entry price
+        
+        if signal.direction == Direction.LONG:
+            calculated_first_target = reference_entry + target_distance
+        else:
+            calculated_first_target = reference_entry - target_distance
+            
+        # Update the first target in the validated signal instance
+        if signal.targets:
+            original_first_target = signal.targets[0].price
+            signal.targets[0].price = calculated_first_target
+            logger.info(
+                f"First target adjusted for {signal.symbol}: "
+                f"Original: {original_first_target} -> "
+                f"Calculated (20%): {calculated_first_target}"
+            )
+
+        # calculated_leverage = self._calculate_leverage(
+        #     entry=reference_entry,
+        #     stop_loss=adjusted_stop_loss,
+        #     direction=signal.direction,
+        # )
+        
+        # we keep it at 20 for some reasons
+        calculated_leverage = 20
 
         db_signal = Signal(
             source_id=source.id,
             symbol=signal.symbol,
             direction=signal.direction,
             leverage=calculated_leverage,
-            stop_loss=signal.stop_loss,
+            stop_loss=adjusted_stop_loss,
             expires_at=datetime.now(UTC) + timedelta(hours=self.states.signal_expiry_timeout),
             status=SignalStatus.CANCELLED if should_cancel else SignalStatus.WAITING_ENTRY,
         )
@@ -362,7 +403,7 @@ class SignalLifecycleService:
                 provider=self._determine_provider(db_signal.symbol),
                 is_active=True,
                 started_at=datetime.now(UTC),
-                current_stop_loss=db_signal.stop_loss,
+                current_stop_loss=adjusted_stop_loss,
                 current_tp1_price=db_signal.targets[0].price if db_signal.targets else None,
             )
             db_tracking = await uow.trackings.add(tracking)
