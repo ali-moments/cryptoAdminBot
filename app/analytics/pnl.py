@@ -116,9 +116,10 @@ class PnlAnalytics:
         signal_msg = await uow.telegram_messages.signal_message(signal.id)
         signal_msg_id = signal_msg.message_id if signal_msg else 0
         
-        # Skip cancelled/expired signals
-        if (tracking.close_reason in (CloseReason.CANCELLED, CloseReason.EXPIRED) or
-            not tracking.has_entered):  # Never entered
+        # Skip only non-profitable cancellations and expired signals
+        if (tracking.close_reason == CloseReason.EXPIRED and not tracking.profit_percent) or \
+           (tracking.close_reason == CloseReason.CANCELLED and not tracking.profit_percent) or \
+           (not tracking.has_entered and not tracking.profit_percent):
             return None
         
         # Check if any TPs were hit (even if still active)
@@ -141,12 +142,18 @@ class PnlAnalytics:
             else:
                 pnl = Decimal("0")
                 
-        elif (tracking.close_reason in (CloseReason.ORIGINAL_STOP_LOSS, CloseReason.MOVED_STOP_LOSS)):
+        elif tracking.close_reason == CloseReason.ORIGINAL_STOP_LOSS or tracking.close_reason == CloseReason.MOVED_STOP_LOSS:
             # Stop loss hit
             status = "STOP"
             close_msg = await uow.telegram_messages.get_close_message(tracking.id)
             status_msg_id = close_msg.message_id if close_msg else None
             pnl = tracking.profit_percent or Decimal("0")
+            
+        elif tracking.close_reason == CloseReason.CANCELLED and tracking.profit_percent:
+            # TP1 crossed cancellation (missed opportunity that reached TP1)
+            status = "TP1*"
+            status_msg_id = signal_msg_id  # Use signal message
+            pnl = tracking.profit_percent
             
         elif tracking.is_active:
             # Still active - calculate unrealized P&L

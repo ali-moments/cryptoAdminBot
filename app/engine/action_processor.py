@@ -2,7 +2,7 @@ from decimal import Decimal
 from loguru import logger
 from typing import TYPE_CHECKING
 
-from app.database.enums import TrackingStatus, AuditEventType, Direction, EntryMethod, SignalStatus
+from app.database.enums import TrackingStatus, AuditEventType, Direction, EntryMethod, SignalStatus, CloseReason
 from app.database.models import Tracking
 from app.database.uow import UnitOfWork
 from app.engine.actions import (
@@ -312,6 +312,22 @@ class ActionProcessor:
         tracking.status = TrackingStatus.CANCELLED
         tracking.is_active = False
         tracking.closed_at = action.timestamp
+        tracking.close_reason = CloseReason.CANCELLED
+
+        # For TP1 crossed scenarios, calculate the profit that was available
+        if action.reason == "tp1_crossed" and tracking.signal.entries and tracking.signal.targets:
+            entry1_price = tracking.signal.entries[0].price
+            tp1_price = tracking.signal.targets[0].price
+            
+            # Calculate profit percentage from entry1 to TP1
+            tp1_profit_pct = self._calculate_profit_percentage(
+                tracking.signal.direction,
+                entry1_price,
+                tp1_price,
+            )
+            
+            tracking.profit_percent = tp1_profit_pct
+            tracking.final_price = tp1_price
 
         # Write audit log
         await uow.audit_logs.create(
@@ -320,12 +336,15 @@ class ActionProcessor:
             event=AuditEventType.SIGNAL_EXPIRED,
             payload={
                 "reason": action.reason,
+                "profit_percent": str(tracking.profit_percent) if tracking.profit_percent else None,
+                "final_price": str(tracking.final_price) if tracking.final_price else None,
                 "timestamp": action.timestamp.isoformat(),
             },
         )
 
         # Log event
-        logger.info(f"✓ WAITING ENTRY EXPIRED: {tracking.signal.symbol} - {action.reason} (tracking_id={tracking.id})")
+        profit_msg = f" (+{tracking.profit_percent:.2f}% available)" if tracking.profit_percent else ""
+        logger.info(f"✓ WAITING ENTRY EXPIRED: {tracking.signal.symbol} - {action.reason}{profit_msg} (tracking_id={tracking.id})")
 
         # # Send Telegram notification
         await self._telegram.send_signal_cancelled(tracking, action.reason, uow)
@@ -383,6 +402,23 @@ class ActionProcessor:
         tracking.status = TrackingStatus.CLOSED
         tracking.is_active = False
         tracking.closed_at = action.timestamp
+        tracking.close_reason = CloseReason.ORIGINAL_STOP_LOSS
+        tracking.final_price = action.price
+
+        # Calculate loss percentage for persistence and notification using effective entry price (average if both entries touched)
+        effective_entry = self._get_effective_entry_price(tracking)
+        if effective_entry:
+            loss_pct = abs(self._calculate_profit_percentage(
+                tracking.signal.direction,
+                effective_entry,
+                action.price,
+            ))
+            # Store as negative percentage for losses
+            tracking.profit_percent = -loss_pct
+            
+            # Apply leverage to the loss percentage for display
+            leveraged_loss_pct = loss_pct * tracking.signal.leverage
+            await self._telegram.send_sl_hit(tracking, f"{leveraged_loss_pct:.2f}", uow)
 
         # Write audit log
         await uow.audit_logs.create(
@@ -392,24 +428,13 @@ class ActionProcessor:
             payload={
                 "reason": "stop_loss",
                 "price": str(action.price),
+                "profit_percent": str(tracking.profit_percent) if tracking.profit_percent else None,
                 "timestamp": action.timestamp.isoformat(),
             },
         )
 
         # Log event
-        logger.info(f"✓ STOP LOSS HIT: {tracking.signal.symbol} @ {action.price} (tracking_id={tracking.id})")
-
-        # Calculate loss percentage for notification using effective entry price (average if both entries touched)
-        effective_entry = self._get_effective_entry_price(tracking)
-        if effective_entry:
-            loss_pct = abs(self._calculate_profit_percentage(
-                tracking.signal.direction,
-                effective_entry,
-                action.price,
-            ))
-            # Apply leverage to the loss percentage for display
-            leveraged_loss_pct = loss_pct * tracking.signal.leverage
-            await self._telegram.send_sl_hit(tracking, f"{leveraged_loss_pct:.2f}", uow)
+        logger.info(f"✓ STOP LOSS HIT: {tracking.signal.symbol} @ {action.price} ({tracking.profit_percent:.2f}%) (tracking_id={tracking.id})")
 
         # TODO: Update statistics (loss)
 
@@ -475,6 +500,8 @@ class ActionProcessor:
         tracking.status = TrackingStatus.RISK_FREE
         tracking.is_active = False
         tracking.closed_at = action.timestamp
+        tracking.close_reason = CloseReason.EXPIRED
+        tracking.final_price = action.price
 
         # Write audit log
         await uow.audit_logs.create(
@@ -507,6 +534,7 @@ class ActionProcessor:
         tracking.status = TrackingStatus.CLOSED
         tracking.is_active = False
         tracking.closed_at = action.timestamp
+        tracking.close_reason = CloseReason.ALL_TARGETS_HIT
 
         # Write audit log
         await uow.audit_logs.create(
